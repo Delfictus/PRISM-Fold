@@ -1,0 +1,122 @@
+# TUNED CONFIGURATION BASED ON TELEMETRY ANALYSIS
+# μ=0.75 for stability, all parameters optimized from telemetry data
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = true
+rl_learning_rate = 0.03
+rl_discount_factor = 0.98
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.10
+dsatur_ratio = 0.75
+random_ratio = 0.15
+anchor_fraction = 0.35
+
+[phase0_dendritic]
+enabled = true
+num_branches = 10
+branch_depth = 6
+learning_rate = 0.015
+activation_threshold = 0.35
+plasticity = 0.90
+gpu_enabled = true
+
+[phase1_active_inference]
+enabled = true
+prior_precision = 2.5
+likelihood_precision = 3.5
+learning_rate = 0.12
+free_energy_threshold = 0.06
+num_iterations = 150
+
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.0   # REDUCED from 1.5
+final_temperature = 0.001
+cooling_rate = 0.96         # SLOWER from 0.95
+steps_per_temp = 100        # MORE steps
+compaction_enabled = true
+compaction_threshold = 0.08
+
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.15       # INCREASED from 0.08
+coupling_strength = 8.0     # REDUCED from 12.0
+max_colors = 17             # Critical!
+num_qubits = 125
+use_complex_amplitudes = true
+evolution_iterations = 200   # MORE iterations
+transverse_field = 1.5      # INCREASED tunneling
+interference_decay = 0.01
+schedule_type = "exponential"
+stochastic_measurement = true
+
+[phase3_pimc]
+enabled = true
+num_replicas = 32
+dimensions = 125
+beta = 3.0
+delta_tau = 0.06
+transverse_field = 1.5
+coupling_strength = 2.0
+mc_steps = 150
+use_sparse = false
+gpu_enabled = true
+
+[phase4_geodesic]
+enabled = true
+distance_threshold = 3
+centrality_weight = 1.5
+gpu_enabled = true
+
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 120
+flow_strength = 0.4
+diffusion_rate = 0.25
+
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.40
+max_dimension = 2
+coherence_cv_threshold = 0.20
+vietoris_rips_radius = 2.0
+gpu_enabled = true
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 16           # INCREASED from 8
+exchange_interval = 10
+temperature_range = [0.001, 1.0]  # NARROWER range
+diversity_weight = 0.3      # INCREASED diversity
+consensus_threshold = 0.85
+gpu_enabled = true
+
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 2.0  # REDUCED from 3.5
+feedback_strength = 1.2
+hotspot_threshold = 3
+stress_decay_rate = 0.80
+overlap_penalty = 2.0
+
+[memetic]
+enabled = true
+population_size = 60        # BALANCED
+mutation_rate = 0.10
+crossover_rate = 0.90
+elite_fraction = 0.35
+max_generations = 300       # REASONABLE
+local_search_intensity = 0.80  # STRONG but not max
+tournament_size = 5
+convergence_threshold = 50
+
+[telemetry]
+enabled = true
+capture_all_phases = true
+
+[logging]
+level = "info"

@@ -1,0 +1,175 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# PRISM WORLD RECORD CONFIGURATION - TARGET: 17 COLORS
+# ═══════════════════════════════════════════════════════════════════════════
+# EXTREME AGGRESSIVE SETTINGS FOR DSJC125.5 WORLD RECORD ATTEMPT
+# Chemical Potential μ=0.5 in GPU kernels forces deep compression
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 100                # Many attempts to find the deep minimum
+enable_fluxnet_rl = true         # Universal RL across all phases
+rl_learning_rate = 0.03          # Aggressive RL learning
+rl_discount_factor = 0.99        # Long-term reward optimization
+rl_discretization_mode = "extended"  # 65536 state space (maximum)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WARMSTART: Start from good solution
+# ═══════════════════════════════════════════════════════════════════════════
+[warmstart]
+enabled = true
+greedy_ratio = 0.20
+dsatur_ratio = 0.60              # DSatur is best for dense graphs
+random_ratio = 0.20
+anchor_fraction = 0.30           # Lock more high-quality vertices
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 0: DENDRITIC RESERVOIR (Neuromorphic Computing)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase0_dendritic]
+enabled = true
+num_branches = 10                # Maximum dendrite branches
+branch_depth = 8                 # Very deep hierarchical processing
+learning_rate = 0.015            # Faster learning
+activation_threshold = 0.40
+plasticity = 0.85                # High synaptic plasticity
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 1: ACTIVE INFERENCE (Bayesian Decision Making)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase1_active_inference]
+enabled = true
+prior_precision = 2.5
+likelihood_precision = 3.5
+learning_rate = 0.12             # Very aggressive belief updates
+free_energy_threshold = 0.06     # Tighter convergence
+num_iterations = 200             # More inference cycles
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 2: THERMODYNAMIC ANNEALING (μ=0.5 in kernel)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 2.5        # Lower initial temp (preserve warmstart)
+final_temperature = 0.001        # Ultra-low final temperature
+cooling_rate = 0.88              # Slower cooling for deep search
+steps_per_temp = 200             # Many steps per temperature
+compaction_enabled = true
+compaction_threshold = 0.10      # Very aggressive compaction
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3: COMPLEX QUANTUM EVOLUTION (μ=0.5 in kernel)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+
+# Quantum parameters tuned for deep compression
+evolution_time = 0.15            # Slightly lower for stability with high μ
+coupling_strength = 7.0          # Very strong conflict penalty
+max_colors = 17                  # EXACT TARGET - Critical for 17 colors!
+num_qubits = 125
+
+# Complex quantum evolution features
+use_complex_amplitudes = true
+evolution_iterations = 800       # Many iterations for convergence
+transverse_field = 1.5           # Moderate tunneling (not too high)
+interference_decay = 0.005       # Very slow decoherence
+schedule_type = "exponential"
+stochastic_measurement = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3B: PIMC (Path Integral Monte Carlo)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_pimc]
+enabled = true
+num_replicas = 100               # Maximum replicas for exploration
+dimensions = 125
+beta = 3.0                       # Higher inverse temperature
+delta_tau = 0.05                 # Finer time slices
+transverse_field = 1.5
+coupling_strength = 2.0          # Strong coupling
+mc_steps = 500                   # Many Monte Carlo steps
+use_sparse = false               # Sparse not implemented yet (dense works for 125 vertices)
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 4: GEODESIC DISTANCES
+# ═══════════════════════════════════════════════════════════════════════════
+[phase4_geodesic]
+enabled = true
+distance_threshold = 3           # Tighter neighborhood
+centrality_weight = 1.5          # Strong centrality emphasis
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 5: GEODESIC FLOW
+# ═══════════════════════════════════════════════════════════════════════════
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 200
+flow_strength = 0.5
+diffusion_rate = 0.25
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 6: TDA (Topological Data Analysis)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.45
+max_dimension = 3
+coherence_cv_threshold = 0.20
+vietoris_rips_radius = 2.0
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 7: ENSEMBLE EXCHANGE
+# ═══════════════════════════════════════════════════════════════════════════
+[phase7_ensemble]
+enabled = true
+num_replicas = 32                # Many replicas
+exchange_interval = 10           # Very frequent exchanges
+temperature_range = [0.1, 2.5]   # Narrower range (focus on low temps)
+diversity_weight = 0.3           # Less diversity (focus on quality)
+consensus_threshold = 0.80       # Higher agreement requirement
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# METAPHYSICAL COUPLING (Geometry Feedback)
+# ═══════════════════════════════════════════════════════════════════════════
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 2.5     # Very strong geometry feedback
+feedback_strength = 1.2          # Maximum coupling
+hotspot_threshold = 3            # Detect high-conflict regions early
+stress_decay_rate = 0.80         # Slower stress relaxation
+overlap_penalty = 2.0            # Strong penalty for same-color edges
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMETIC EVOLUTION - EXTREME SETTINGS FOR 17 COLORS
+# ═══════════════════════════════════════════════════════════════════════════
+[memetic]
+enabled = true
+population_size = 500            # HUGE population for deep search
+mutation_rate = 0.12             # Lower mutation (preserve good solutions)
+crossover_rate = 0.85            # Very high crossover
+elite_fraction = 0.30            # Keep more elites
+max_generations = 5000           # EXTREME evolution depth
+local_search_intensity = 0.95    # MAXIMUM local optimization
+tournament_size = 7              # Larger tournament pressure
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TELEMETRY & LOGGING
+# ═══════════════════════════════════════════════════════════════════════════
+[telemetry]
+enabled = true
+capture_all_phases = true
+capture_rl_state = true
+capture_gpu_metrics = true
+ndjson_format = true
+
+[logging]
+level = "info"
+log_gpu_kernel_times = true
+log_phase_transitions = true
+log_rl_rewards = true

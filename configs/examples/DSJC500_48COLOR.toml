@@ -1,0 +1,99 @@
+# DSJC500.5 Optimized for 48-Color Solution
+# Target: EXACTLY 48 colors with 0 conflicts
+
+[phase2]
+# More balanced thermodynamic - don't go below target
+type = "thermodynamic"
+max_iterations_per_round = 100000  # VERY deep exploration
+conflict_penalty_weight = 200.0  # EXTREME conflict penalty
+initial_temperature = 3.0  # Moderate starting temp
+annealing_factor = 0.995  # VERY slow cooling for precision
+replica_count = 32  # Maximum replicas
+allow_temporary_conflicts = false
+constraint_violation_penalty = 100.0
+min_colors = 45  # Don't go below this
+target_colors = 48  # Aim for this
+
+[phase3]
+# Quantum targeting EXACTLY 48 colors
+type = "quantum"
+target_colors = 48  # EXACT target - chromatic number of DSJC500.5
+chemical_potential = 2.5  # VERY aggressive μ to force 48 colors
+coupling_strength = 20.0  # Strong coupling
+enable_memetic_boost = true
+memetic_intensity = 0.99  # Maximum intensity
+quantum_iterations = 500  # More iterations for convergence
+transverse_field_schedule = "exponential"  # Better annealing
+
+[memetic]
+# MAXIMUM aggression with head algorithm
+local_search_probability = 0.99  # Almost always search
+local_search_iterations = 1000  # Very deep local search
+kempe_chain_attempts = 200  # Extensive Kempe chains
+conflict_resolution_mode = "head"  # Head-first algorithm
+greedy_improvement = true
+exhaustive_neighborhood = false
+aggressive_conflict_targeting = true
+parallel_chains = true
+elite_size = 10
+crossover_rate = 0.9
+mutation_rate = 0.4
+adaptive_operator_selection = true
+tabu_tenure = 50  # Add tabu search
+aspiration_criterion = true
+
+[whcr]
+# Keep disabled - it's making things worse
+enabled = false
+
+[phase0]
+sparsity = 0.2
+activation_threshold = 0.3
+branch_factor = 6
+coupling_strength = 0.95
+
+[phase1]
+prior_precision = 15.0
+learning_rate = 0.4
+inference_iterations = 200
+belief_update_rate = 0.6
+
+[phase4]
+distance_threshold = 2.5
+
+[phase5]
+num_layers = 6
+hidden_dim = 256
+learning_rate = 0.15
+training_epochs = 300
+
+[phase6]
+persistence_threshold = 0.03
+max_dimension = 2
+num_landmarks = 300
+
+[phase7]
+entropy_threshold = 0.2
+transfer_rate = 0.9
+
+[mec]
+reaction_rate = 0.95
+diffusion_coefficient = 0.4
+catalyst_concentration = 0.9
+
+[orchestrator]
+checkpoint_interval = 50
+convergence_threshold = 0.00001  # Very strict
+max_stall_iterations = 2000
+color_reduction_rate = 0.02  # Gradual reduction toward 48
+
+[gpu]
+block_size = 256
+shared_memory_per_block = 49152
+max_registers_per_thread = 64
+prefer_l1_cache = false
+enable_tensor_cores = true
+
+[logging]
+level = "info"
+show_progress = true

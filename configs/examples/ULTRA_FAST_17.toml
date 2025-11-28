@@ -1,0 +1,84 @@
+# ULTRA FAST CONFIG - NO FREEZING, QUICK RESULTS
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = false  # Disabled for speed
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.15
+dsatur_ratio = 0.70
+random_ratio = 0.15
+anchor_fraction = 0.35
+
+# MINIMAL PHASES FOR SPEED
+[phase0_dendritic]
+enabled = false  # DISABLED
+
+[phase1_active_inference]
+enabled = false  # DISABLED
+
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 2.0
+final_temperature = 0.01
+cooling_rate = 0.95
+steps_per_temp = 30  # VERY FAST
+compaction_enabled = true
+compaction_threshold = 0.1
+
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.1
+coupling_strength = 8.0
+max_colors = 17  # CRITICAL FIX - Must allow 17!
+num_qubits = 125
+use_complex_amplitudes = false  # Faster
+evolution_iterations = 50  # MINIMAL
+transverse_field = 1.0
+interference_decay = 0.01
+schedule_type = "linear"
+stochastic_measurement = true
+
+[phase3_pimc]
+enabled = false  # DISABLED
+
+[phase4_geodesic]
+enabled = false  # DISABLED
+
+[phase5_geodesic_flow]
+enabled = false  # DISABLED
+
+[phase6_tda]
+enabled = false  # DISABLED
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 8  # MINIMAL
+exchange_interval = 20
+temperature_range = [0.1, 2.0]
+diversity_weight = 0.2
+consensus_threshold = 0.7
+gpu_enabled = true
+
+[metaphysical_coupling]
+enabled = false  # DISABLED
+
+# MINIMAL MEMETIC - WON'T FREEZE
+[memetic]
+enabled = true
+population_size = 20   # TINY population
+mutation_rate = 0.15
+crossover_rate = 0.75
+elite_fraction = 0.25
+max_generations = 50   # VERY FEW generations
+local_search_intensity = 0.5  # Light local search
+tournament_size = 2
+convergence_threshold = 20  # Stop early
+
+[telemetry]
+enabled = false
+
+[logging]
+level = "info"

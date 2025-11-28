@@ -1,0 +1,134 @@
+# WR Sweep D (quantum-deeper)
+# Deeper quantum annealing depth for more thorough exploration
+# VRAM-safe for 8GB devices (replicas=48, beads=48)
+
+profile = "wr_sweep_D"
+version = "1.1.0"
+target_chromatic = 83
+deterministic = false
+max_runtime_hours = 24.0
+
+[cpu]
+threads = 24
+pin_pool = false
+work_steal = true
+parallel_io = true
+
+[initial_coloring]
+strategy = "spectral"  # Higher-quality seed for lower starting chromatic
+
+[gpu]
+device_id = 0
+streams = 4              # Parallel stream scheduler for phase overlap
+stream_mode = "parallel" # Enable concurrent phase execution
+batch_size = 4096        # Larger batches to saturate GPU
+enable_reservoir_gpu = true
+enable_te_gpu = true
+enable_statmech_gpu = true
+enable_quantum_gpu = true
+enable_pimc_gpu = true
+enable_thermo_gpu = true
+enable_tda_gpu = true
+
+[orchestrator]
+use_reservoir_prediction = true
+use_active_inference = true
+use_gpu_active_inference = true  # GPU-accelerated Active Inference (Phase 1)
+use_transfer_entropy = true
+use_geodesic_features = true
+use_thermodynamic_equilibration = true
+use_pimc = true
+use_quantum_classical_hybrid = true
+use_gnn_screening = true
+use_adp_learning = true
+use_tda = true
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+restarts = 8
+early_stop_no_improve_iters = 5
+checkpoint_minutes = 15
+adp_dsatur_depth = 50000
+adp_quantum_iterations = 45  # Match increased quantum iterations
+adp_thermo_num_temps = 64    # MOVE 2: Match increased thermo temps
+
+[neuromorphic]
+enabled = true
+reservoir_size = 2000  # Increased from 1500 for enhanced conflict predictions (Task A1)
+spectral_radius = 0.9
+leak_rate = 0.3
+input_scaling = 0.5
+
+[dsatur]
+geodesic_weight = 0.30
+reservoir_weight = 0.30
+ai_weight = 0.40
+tie_break = "quantum_then_thermo"
+
+[quantum]
+iterations = 45          # Crank up for real GPU annealer
+target_chromatic = 83
+depth = 8                # Deeper exploration
+attempts = 512           # More attempts for escape
+beta = 0.95              # Stronger quantum effects
+temperature = 0.7        # Lower temp for tighter annealing
+
+[memetic]
+population_size = 320    # Heavier population for finishing polish
+elite_size = 8
+generations = 1200       # More generations for thorough refinement
+mutation_rate = 0.09     # Higher mutation for escape
+tournament_size = 3
+local_search_depth = 20000  # Deep local search for final pass
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+[thermo]
+replicas = 56            # Push harder to avoid Phase 2 stalls
+num_temps = 76           # AGGRESSIVE: Increased from 64 (19% increase for deeper exploration)
+exchange_interval = 20
+t_min = 0.0005           # Much lower min for fine-grained annealing
+t_max = 15.0             # Higher max for aggressive exploration
+steps_per_temp = 20000   # AGGRESSIVE: Increased from 12000 (67% increase for thorough equilibration)
+batch_size = 4096        # Match GPU batch size for 4 streams
+damping = 0.02
+schedule = "geometric"
+force_start_temp = 9.5   # AGGRESSIVE: Start force activation much earlier (was 6.5)
+force_full_strength_temp = 3.0  # AGGRESSIVE: Steeper ramp to full strength (was 2.5)
+
+[pimc]
+replicas = 48
+beads = 48
+beta = 1.0
+tau = 0.1
+steps = 20000
+
+[adp]
+epsilon = 0.3
+epsilon_decay = 0.995
+epsilon_min = 0.05
+alpha = 0.1
+gamma = 0.95
+
+[iterative]
+enabled = true           # Enable multi-pass loopback with best solution
+max_passes = 4           # Up to 4 full pipeline passes (increased for deeper search)
+min_delta = 0            # Continue even with small improvements (was 1)
+
+[hypertune]
+enabled = true           # Enable telemetry-driven ADP parameter tuning
+stall_threshold = 100
+efficiency_threshold = 0.5
+
+# Transfer Entropy Configuration (Phase 1)
+[transfer_entropy]
+histogram_bins = 32            # Safe for 8GB VRAM (clamped in GPU kernel)
+time_series_steps = 100        # Safe for 8GB (200 causes OOM on RTX 5070)
+te_vs_kuramoto_weight = 0.85   # TE gets 85% weight vs Kuramoto 15%
+geodesic_weight = 0.35         # Geodesic feature weight
+
+# TDA Configuration (Phase 6)
+[tda]
+enabled = true
+use_gpu = true  # Enable GPU-accelerated TDA if available
+persistence_depth = 3          # Increased depth for thorough topology analysis
+clique_search_depth = 1000     # More thorough clique search

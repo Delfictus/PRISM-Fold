@@ -1,0 +1,167 @@
+# PRISM Complete Tunable Configuration
+# Date: 2025-11-23
+# Status: 100% TOML Tunability Achieved
+#
+# This configuration demonstrates full parameter control across all 7 phases.
+# All phases (0, 1, 4, 6, 7) now support TOML-based tunability.
+
+[global]
+max_attempts = 10
+enable_fluxnet_rl = true
+
+# ==============================================================================
+# Phase 0: Dendritic Reservoir
+# ==============================================================================
+# Neuromorphic reservoir computing for warmstart prior generation.
+# Controls dendritic branch architecture and learning dynamics.
+[phase0_dendritic]
+num_branches = 10               # Number of dendritic branches (1-32)
+branch_depth = 6                # Depth of each branch
+learning_rate = 0.01            # Reservoir learning rate
+plasticity = 0.05               # Synaptic plasticity factor
+activation_threshold = 0.5      # Neuron activation threshold
+reservoir_size = 512            # Size of reservoir state
+readout_size = 128              # Readout layer size
+gpu_enabled = true              # Enable GPU acceleration
+
+# ==============================================================================
+# Phase 1: Active Inference
+# ==============================================================================
+# Variational free energy minimization for uncertainty-driven vertex ordering.
+[phase1_active_inference]
+prior_precision = 1.0           # Prior belief precision
+likelihood_precision = 2.0      # Likelihood precision
+learning_rate = 0.001           # Belief update learning rate
+free_energy_threshold = 0.01    # Convergence threshold for free energy
+num_iterations = 1000           # Maximum inference iterations
+hidden_states = 64              # Hidden state dimensionality
+policy_depth = 3                # Policy planning depth
+exploration_bonus = 0.1         # Exploration bonus coefficient
+gpu_enabled = true              # Enable GPU acceleration
+
+# ==============================================================================
+# Phase 2: Thermodynamic Simulated Annealing
+# ==============================================================================
+# Parallel tempering with adaptive cooling schedules.
+# Supports geometry stress-based temperature adjustment.
+[phase2_thermodynamic]
+initial_temperature = 4.0       # Starting temperature
+cooling_rate = 0.95             # Exponential cooling factor
+steps_per_temp = 24000          # Iterations per temperature
+num_temps = 72                  # Number of temperature replicas
+temp_min = 0.01                 # Minimum temperature
+temp_max = 10.0                 # Maximum temperature (adjusted by geometry stress)
+
+# ==============================================================================
+# Phase 3: Quantum-Classical Hybrid
+# ==============================================================================
+# Quantum annealing with adiabatic evolution and measurement collapse.
+# Supports geometry stress-based coupling adjustment.
+[phase3_quantum]
+evolution_time = 100.0          # Total evolution time
+coupling_strength = 10.0        # Anti-ferromagnetic coupling (adjusted by stress)
+transverse_field = 2.0          # Transverse field strength (quantum tunneling)
+max_colors = 17                 # Maximum colors in search space
+evolution_iterations = 400      # Number of evolution steps
+num_qubits = 250                # Number of qubits (auto-set to graph size)
+use_complex_amplitudes = true   # Use complex quantum amplitudes
+gpu_enabled = true              # Enable GPU acceleration
+
+# ==============================================================================
+# Phase 4: Geodesic Distance
+# ==============================================================================
+# All-pairs shortest paths with Floyd-Warshall and centrality metrics.
+[phase4_geodesic]
+distance_threshold = 3.0        # Maximum geodesic distance for influence
+centrality_weight = 1.0         # Betweenness centrality weight
+diameter_penalty = 0.5          # Graph diameter penalty coefficient
+use_betweenness = true          # Compute betweenness centrality
+use_closeness = false           # Compute closeness centrality
+use_eigenvector = false         # Compute eigenvector centrality
+gpu_enabled = true              # Enable GPU Floyd-Warshall
+anchor_fraction = 0.10          # Fraction of vertices as structural anchors
+
+# ==============================================================================
+# Phase 6: Topological Data Analysis (TDA)
+# ==============================================================================
+# Persistent homology and Vietoris-Rips complex construction.
+[phase6_tda]
+persistence_threshold = 0.1     # Minimum feature persistence
+max_dimension = 2               # Maximum homology dimension (H0, H1, H2)
+num_landmarks = 100             # Number of landmark vertices
+filtration_steps = 50           # Filtration granularity
+distance_metric = "geodesic"    # Distance metric (geodesic, euclidean)
+boundary_detection = true       # Enable boundary detection
+gpu_enabled = true              # Enable GPU acceleration
+anchor_fraction = 0.15          # Fraction of persistent features as anchors
+
+# ==============================================================================
+# Phase 7: Ensemble Aggregation
+# ==============================================================================
+# Multi-solution consensus with voting strategies.
+# Supports geometry hotspot-based diversity adjustment.
+[phase7_ensemble]
+num_replicas = 64               # Number of solution replicas
+exchange_interval = 10          # Replica exchange frequency
+temperature_min = 0.1           # Minimum replica temperature
+temperature_max = 2.0           # Maximum replica temperature
+diversity_weight = 0.1          # Solution diversity weight (adjusted by hotspots)
+consensus_threshold = 0.7       # Consensus agreement threshold
+voting_method = "weighted"      # Voting strategy: majority, weighted, best
+replica_selection = "best"      # Replica selection: best, random, boltzmann
+
+# ==============================================================================
+# Memetic Algorithm
+# ==============================================================================
+# Genetic algorithm with local search for refinement.
+[memetic]
+population_size = 200           # Population size
+mutation_rate = 0.40            # Mutation probability
+crossover_rate = 0.70           # Crossover probability
+max_generations = 1500          # Maximum generations
+elitism_size = 10               # Elite solutions preserved
+local_search_depth = 50         # Local search iterations
+tournament_size = 3             # Tournament selection size
+
+# ==============================================================================
+# Metaphysical Coupling
+# ==============================================================================
+# Inter-phase feedback via geometry telemetry.
+# Enables geometry stress to modulate Phase 2, 3, 7 parameters.
+[metaphysical_coupling]
+enabled = true                  # Enable geometry-based coupling
+geometry_stress_weight = 2.0    # Stress influence on temp/coupling
+feedback_strength = 1.2         # Feedback loop gain
+stress_threshold = 0.5          # Minimum stress for activation
+hotspot_threshold = 10          # Minimum hotspots for diversity boost
+
+# ==============================================================================
+# Warmstart Configuration
+# ==============================================================================
+# Probabilistic color priors from Phase 0 reservoir and ensemble methods.
+[warmstart]
+max_colors = 50                 # Maximum colors in prior distribution
+min_prob = 0.01                 # Minimum probability floor
+anchor_fraction = 0.10          # Fraction of anchored vertices
+flux_weight = 0.4               # Flux reservoir prior weight
+ensemble_weight = 0.4           # Ensemble heuristic weight
+random_weight = 0.2             # Random exploration weight
+
+# ==============================================================================
+# GPU Configuration
+# ==============================================================================
+[gpu]
+enabled = true                  # Enable GPU acceleration
+device_id = 0                   # CUDA device ID
+ptx_dir = "target/ptx"          # PTX module directory
+allow_nvrtc = false             # Allow runtime compilation
+require_signed_ptx = false      # Require PTX signature verification
+
+# ==============================================================================
+# Telemetry
+# ==============================================================================
+[telemetry]
+enabled = true                  # Enable telemetry logging
+path = "telemetry.jsonl"        # Output file path
+include_geometry = true         # Include geometry metrics
+include_quantum = true          # Include quantum telemetry

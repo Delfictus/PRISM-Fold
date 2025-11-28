@@ -1,0 +1,37 @@
+[package]
+name = "neuromorphic-engine"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["simulation"]
+# Real CUDA GPU acceleration (requires NVIDIA drivers + RTX GPU)
+cuda = ["dep:cudarc"]
+# CPU-based simulation with artificial speedup for testing
+simulation = []
+
+[dependencies]
+nalgebra = { version = "0.33", features = ["std"] }
+ndarray = "0.15"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+dashmap = "6.0"
+
+# CPU optimization (always available)
+rayon = "1.10"
+
+# GPU acceleration - aligned with parent workspace cudarc 0.9
+cudarc = { version = "0.9", features = ["std"], optional = true }
+
+[lib]
+name = "neuromorphic_engine"
+path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "cpu_vs_gpu_benchmark"
+harness = false

@@ -1,0 +1,63 @@
+# PRISM Fast Memetic Configuration for DSJC250.5
+#
+# Optimization: Phase 2 iterations reduced from 10K → 5K for 2x speedup
+#
+# Expected Performance:
+# - Per-attempt GPU time: ~12s (down from ~24s)
+# - 256 attempts in ~51 minutes (instead of 102 minutes)
+# - Trade-off: May produce 42-color baseline (vs 41), but faster iteration
+#
+# Usage:
+#   ./prism-cli --input benchmarks/dimacs/DSJC250.5.col --gpu --attempts 256 --config configs/dsjc250_fast.toml
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+# Enable memetic algorithm for CPU-based population evolution
+enabled = true
+
+# Population size: Number of solutions in the gene pool
+population_size = 128
+
+# Number of evolutionary generations
+generations = 500
+
+# Crossover rate: Probability of recombining two parent solutions
+crossover_rate = 0.8
+
+# Mutation rate: Probability of random color change per vertex
+mutation_rate = 0.05
+
+# Local search iterations: Greedy improvement steps per offspring
+local_search_iterations = 100
+
+# Elitism: Number of best solutions preserved across generations
+elitism_count = 10
+
+# Selection strategy: "tournament" (fast) or "roulette" (diversity-preserving)
+selection_strategy = "tournament"
+
+# Tournament size: Number of candidates per selection (if using tournament)
+tournament_size = 5
+
+# Diversity maintenance: Penalize duplicate solutions
+maintain_diversity = true
+
+# Convergence threshold: Stop early if best solution unchanged for N generations
+convergence_threshold = 50
+
+[gpu]
+# GPU config for initial population generation (Phase 0-6 pipeline)
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# Thermodynamic annealing hyperparameters
+# OPTIMIZATION: iterations reduced from 10000 → 5000 for 2x speedup
+iterations = 5000
+replicas = 8
+temp_min = 0.01
+temp_max = 10.0

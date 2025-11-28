@@ -1,0 +1,31 @@
+# PRISM Configuration with GNN Integration Test
+
+max_vertices = 10000
+timeout_seconds = 3600
+enable_telemetry = true
+telemetry_path = "telemetry_gnn_test.jsonl"
+
+[gpu]
+enabled = false
+device_id = 0
+ptx_dir = "target/ptx"
+allow_nvrtc = false
+require_signed_ptx = false
+nvml_poll_interval_ms = 1000
+
+[phase2]
+iterations = 1000
+replicas = 8
+temp_min = 0.01
+temp_max = 10.0
+
+# Enable GNN for graph analysis and manifold prediction
+[gnn]
+enabled = true
+hidden_dim = 128
+num_layers = 3
+dropout = 0.5
+learning_rate = 0.001
+architecture = "e3_equivariant"  # Options: "e3_equivariant", "onnx"
+# onnx_model_path = "models/gnn_chromatic.onnx"  # Required if architecture = "onnx"
+use_gpu = false

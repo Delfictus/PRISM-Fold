@@ -1,0 +1,48 @@
+[package]
+name = "prism-physics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Core dependencies
+prism-core = { workspace = true }
+prism-gpu = { workspace = true, optional = true }
+
+# Async & error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+
+# Math & scientific
+nalgebra = { workspace = true }
+ndarray = { workspace = true }
+num-complex = { workspace = true }
+rustfft = { workspace = true }
+statrs = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+# GPU
+cudarc = { workspace = true, optional = true }
+
+[features]
+default = []
+cuda = ["cudarc", "prism-gpu/cuda"]
+
+[dev-dependencies]
+approx = "0.5"
+criterion = "0.5"

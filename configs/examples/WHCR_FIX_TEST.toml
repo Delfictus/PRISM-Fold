@@ -1,0 +1,36 @@
+# WHCR Fix Test Configuration
+# Testing the fixes for WHCR oscillation bug
+
+[phase2]
+type = "thermodynamic"
+max_iterations_per_round = 1000  # Reduced for quick test
+conflict_penalty_weight = 50.0
+initial_temperature = 2.0
+annealing_factor = 0.95
+replica_count = 8
+allow_temporary_conflicts = true
+constraint_violation_penalty = 20.0
+
+[phase3]
+type = "quantum"
+target_colors = 16
+chemical_potential = 1.05
+coupling_strength = 10.0
+enable_memetic_boost = true
+
+[whcr]
+enabled = false  # DISABLED: Makes solutions 13x worse until uninitialized memory bug fixed
+v_cycle_levels = 3
+precision_level = 1  # 0=f32 only, 1=mixed, 2=f64 only
+iterations_per_level = 300  # deeper sweeps now that oscillation is controlled
+evaluate_buffer_sizes = true
+geometry_enabled = true
+repair_after_conflicts = 100  # Only repair when conflicts > 100
+dendritic_coupling = true
+wavelet_depth = 2
+
+[memetic]
+local_search_probability = 0.6
+local_search_iterations = 50
+kempe_chain_attempts = 30
+conflict_resolution_mode = "aggressive"

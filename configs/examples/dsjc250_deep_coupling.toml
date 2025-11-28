@@ -1,0 +1,76 @@
+# PRISM Deep Metaphysical Coupling Configuration for DSJC250.5
+#
+# Demonstrates the full reflexive feedback loop:
+# 1. Phase 1 generates early geometry proxy from uncertainty
+# 2. Phase 4/6 compute real geometric stress metrics
+# 3. Geometry stress propagates to ALL phases (1,2,3,7, warmstart)
+# 4. FluxNet RL learns from geometry reward shaping
+# 5. Telemetry logs complete geometry stress → resolution trajectory
+#
+# Expected Behavior:
+# - Early-phase coupling active from Phase 1
+# - Real geometry kicks in at Phase 4/6
+# - RL receives geometry bonuses for stress reduction
+# - Phases adapt dynamically to stress levels
+#
+# Usage:
+#   cargo run --release --bin prism-cli -- \
+#     --input benchmarks/dimacs/DSJC250.5.col \
+#     --config configs/dsjc250_deep_coupling.toml \
+#     --telemetry telemetry_deep_coupling.jsonl
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+timeout_seconds = 1800
+enable_telemetry = true
+telemetry_path = "telemetry_deep_coupling.jsonl"
+
+[gpu]
+enabled = true
+device_id = 0
+ptx_dir = "target/ptx"
+allow_nvrtc = false
+require_signed_ptx = false
+nvml_poll_interval_ms = 1000
+
+[phase2]
+# Moderate annealing for faster iteration (not world-record tuning)
+iterations = 5000
+replicas = 8
+temp_min = 0.01
+temp_max = 10.0
+
+[metaphysical_coupling]
+# Enable ALL metaphysical coupling features
+enabled = true
+
+# Early-phase geometry seeding from Phase 1 uncertainty
+enable_early_phase_seeding = true
+
+# FluxNet reward shaping based on geometry stress deltas
+enable_reward_shaping = true
+
+# Reward scale: 2.0x makes geometry feedback significant
+reward_shaping_scale = 2.0
+
+# Stress thresholds for phase adjustments
+stress_hot_threshold = 0.5      # Moderate adjustments above this
+stress_critical_threshold = 0.8  # Aggressive adjustments above this
+
+# Warmstart hotspot prioritization boost
+warmstart_bias_weight = 2.0
+
+# Memetic mutation rate multiplier for hotspots
+memetic_hotspot_boost = 2.0
+
+# Phase 1 exploration boost at critical stress
+phase1_exploration_boost = 1.5
+
+# Phase 2 temperature scaling coefficient
+phase2_temp_alpha = 0.5
+
+# Minimum reward bonus magnitude for logging (default: 0.001)
+# Logs appear when |geometry_bonus| > threshold
+# Lower value = more verbose logging of geometry reward shaping
+reward_log_threshold = 0.001

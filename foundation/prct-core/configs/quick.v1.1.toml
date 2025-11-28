@@ -1,0 +1,81 @@
+# Quick Test Configuration v1.1
+# All GPU modules enabled by default - omitted fields use serde defaults
+# VRAM-safe for 8GB devices (replicas=56, beads=64)
+
+profile = "quick_v1.1"
+version = "1.1.0"
+target_chromatic = 100
+deterministic = true
+seed = 42
+
+# ALL phases enabled by default (can be omitted, will default to true)
+use_reservoir_prediction = true
+use_active_inference = true
+use_adp_learning = true
+use_thermodynamic_equilibration = true
+use_quantum_classical_hybrid = true
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+use_geodesic_features = false  # Experimental - keep OFF
+
+# Reduced runtime for quick testing
+max_runtime_hours = 1.0
+num_workers = 24
+
+[gpu]
+device_id = 0
+streams = 4
+batch_size = 1024
+# All GPU flags enabled by default (can be omitted)
+enable_reservoir_gpu = true
+enable_thermo_gpu = true
+enable_quantum_gpu = true
+
+[memetic]
+population_size = 32
+elite_size = 4
+generations = 50
+mutation_rate = 0.15
+tournament_size = 3
+local_search_depth = 1000
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+[thermo]
+# VRAM guards for 8GB devices
+replicas = 56
+num_temps = 56
+exchange_interval = 50
+t_min = 0.001
+t_max = 1.0
+
+[quantum]
+iterations = 10
+target_chromatic = 100
+
+[adp]
+epsilon = 1.0
+epsilon_decay = 0.995
+epsilon_min = 0.01
+alpha = 0.1
+gamma = 0.95
+
+[orchestrator]
+adp_dsatur_depth = 50000
+adp_quantum_iterations = 10
+adp_thermo_num_temps = 56
+restarts = 3
+early_stop_no_improve_iters = 2
+checkpoint_minutes = 5
+
+[geodesic]
+num_landmarks = 50
+metric = "hop"
+centrality_weight = 0.3
+eccentricity_weight = 0.3
+
+[cpu]
+threads = 24
+pin_pool = false
+work_steal = true
+parallel_io = true

@@ -1,0 +1,77 @@
+# PRISM Memetic Algorithm Configuration for DSJC250.5 World-Record Optimization
+#
+# Hybrid GPU + CPU Strategy:
+# 1. GPU generates initial population (Phase 0-6 pipeline with multi-attempt parallelism)
+# 2. CPU memetic algorithm evolves population (crossover, mutation, local search)
+# 3. Combines exploration (GPU) with exploitation (CPU local refinement)
+#
+# Expected Performance:
+# - Population size 128: ~42 minutes per generation (128 × 20s GPU time)
+# - 500 generations: ~350 hours (14.6 days) total runtime
+# - Chromatic number progression: 41 → 38 → 36 → 34 → 32 (expected)
+#
+# Usage:
+#   ./prism-cli --input benchmarks/dimacs/DSJC250.5.col --gpu --config configs/dsjc250_memetic.toml
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+# Enable memetic algorithm for CPU-based population evolution
+enabled = true
+
+# Population size: Number of solutions in the gene pool
+# Higher = more diversity, but slower per generation
+# DSJC250.5 recommended: 128 (balance between diversity and speed)
+population_size = 128
+
+# Number of evolutionary generations
+# Each generation: selection → crossover → mutation → local search
+# 500 generations allows sufficient convergence for world-record chromatic numbers
+generations = 500
+
+# Crossover rate: Probability of recombining two parent solutions
+# 0.8 = 80% of offspring created via crossover, 20% via mutation alone
+crossover_rate = 0.8
+
+# Mutation rate: Probability of random color change per vertex
+# TUNING: Increased from 0.05 → 0.06 (Run 2) for deeper exploration
+mutation_rate = 0.06
+
+# Local search iterations: Greedy improvement steps per offspring
+# TUNING: Increased from 100 → 150 (Run 2) for better exploitation
+local_search_iterations = 150
+
+# Elitism: Number of best solutions preserved across generations
+# 10 elite solutions ensure best-found chromatic numbers are never lost
+elitism_count = 10
+
+# Selection strategy: "tournament" (fast) or "roulette" (diversity-preserving)
+# Tournament recommended for large graphs (O(1) selection)
+selection_strategy = "tournament"
+
+# Tournament size: Number of candidates per selection (if using tournament)
+# 5 = moderate selection pressure (balance exploration vs exploitation)
+tournament_size = 5
+
+# Diversity maintenance: Penalize duplicate solutions
+# true = encourages exploration by reducing fitness of similar solutions
+maintain_diversity = true
+
+# Convergence threshold: Stop early if best solution unchanged for N generations
+# 50 = early stop if no improvement for 50 generations (saves time)
+convergence_threshold = 50
+
+[gpu]
+# GPU config for initial population generation (Phase 0-6 pipeline)
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# Thermodynamic annealing hyperparameters (optimized for world-record)
+iterations = 10000
+replicas = 8
+temp_min = 0.01
+temp_max = 10.0

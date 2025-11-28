@@ -1,0 +1,34 @@
+# Biomolecular Configuration for Nipah Virus Drug Discovery
+# Target: Nipah virus glycoprotein G (attachment protein)
+# Application: Antiviral drug candidate screening
+
+[biomolecular]
+# Contact distance for binding site detection (Angstroms)
+contact_distance = 8.0
+
+# Number of docking poses to generate per ligand
+num_poses = 10
+
+# Enable GPU acceleration for structure prediction (if available)
+use_gpu = false
+
+[target]
+# Target protein sequence file
+sequence = "benchmarks/biomolecular/nipah_glycoprotein.fasta"
+
+# Ligand SMILES string (example: remdesivir-like compound)
+# This is a simplified SMILES for demonstration
+ligand_smiles = "CC(C)Oc1ccc(C(=O)N[C@H](C(=O)N[C@@H](Cc2ccccc2)C(=O)O)C(C)C)cc1"
+
+# Alternative ligands to test (optional)
+# ligand_library = "path/to/ligand_library.smi"
+
+[analysis]
+# Minimum binding affinity for hit selection (kcal/mol, lower is better)
+affinity_threshold = -7.0
+
+# RMSD tolerance for pose clustering (Angstroms)
+rmsd_tolerance = 2.0
+
+# Output telemetry
+output_telemetry = "telemetry_biomolecular.jsonl"

@@ -1,0 +1,93 @@
+# DSJC250.5 Aggressive Configuration
+# Target: Push chromatic number from 41 toward 28 (world record frontier)
+#
+# This configuration enables:
+# - Warmstart with dendritic reservoir anchors
+# - GPU-accelerated parallel tempering (16 replicas, 50k iterations)
+# - FluxNet RL with pretrained Q-tables
+# - Extended annealing schedule with high temperature exploration
+
+[graph]
+name = "DSJC250.5"
+vertices = 250
+edges = 15668
+density = 0.502
+expected_chromatic = 28
+
+[warmstart]
+enabled = true
+max_colors = 50                 # Start with generous color space
+anchor_fraction = 0.15          # 37-38 structural anchors from Phase 0
+flux_weight = 0.5               # Higher reservoir influence for structural insights
+ensemble_weight = 0.3           # Ensemble voting for robustness
+random_weight = 0.2             # Moderate randomization
+
+[warmstart.dendritic]
+# Dendritic reservoir parameters for warmstart
+branches = 4
+depth = 3
+learn_rate = 0.01
+sparsity = 0.3
+integration_mode = "gated"      # Best for graph coloring
+
+[phase2_thermodynamic]
+# Aggressive parallel tempering schedule
+enabled = true
+num_replicas = 16               # More temperature schedules for better sampling
+iterations = 50000              # 5x baseline for thorough exploration
+temp_min = 0.001                # Very low for exploitation
+temp_max = 20.0                 # High for exploration
+cooling_rate = 0.98             # Slow cooling for fine-tuning
+swap_interval = 100             # Replica exchange frequency
+
+[phase3_quantum]
+# Quantum annealing parameters (if enabled)
+evolution_time = 100.0
+num_qubits = 250
+coupling_strength = 0.5
+
+[phase6_tda]
+# Topological Data Analysis
+filtration_steps = 100
+persistence_threshold = 0.1
+
+[rl]
+# FluxNet RL configuration
+enabled = true
+epsilon = 0.2                   # More exploitation (80% greedy)
+alpha = 0.05                    # Slower learning for fine-tuning
+gamma = 0.99                    # Long-term planning
+replay_buffer_size = 10000
+replay_batch_size = 32
+discretization_mode = "compact" # 512-state discretization
+
+[rl.curriculum]
+# Pretrained Q-table path (train with scripts/train_fluxnet_dsjc250.sh)
+qtable_path = "profiles/curriculum/qtable_dsjc250.bin"
+load_on_start = true
+
+[pipeline]
+# Pipeline execution settings
+max_retries = 3
+timeout_seconds = 3600          # 1 hour timeout
+early_stop_on_target = true
+target_chromatic = 28           # Stop if we hit world record
+
+[gpu]
+enabled = true
+device_id = 0
+ptx_dir = "target/ptx"
+verify_signatures = false       # Disable for development
+
+[telemetry]
+# Telemetry collection
+enabled = true
+output_dir = "results/dsjc250_aggressive"
+format = "ndjson"
+prometheus_enabled = false
+sqlite_enabled = true
+sqlite_path = "results/dsjc250_aggressive.db"
+
+[logging]
+level = "info"
+file = "results/dsjc250_aggressive.log"

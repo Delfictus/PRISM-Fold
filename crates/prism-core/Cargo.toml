@@ -1,0 +1,22 @@
+[package]
+name = "prism-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+log = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3.8"

@@ -1,0 +1,47 @@
+# Materials Configuration for Battery Cathode Discovery
+# Target: Lithium-ion battery cathode materials
+# Application: Next-generation energy storage
+
+[materials]
+# Number of candidate materials to generate
+num_candidates = 20
+
+# Enable GPU acceleration for property prediction (if available)
+use_gpu = false
+
+# Random seed for reproducibility
+seed = 42
+
+[target_properties]
+# Target band gap range (eV) - semiconducting materials
+band_gap_min = 1.0
+band_gap_max = 3.0
+
+# Maximum formation energy (eV/atom) - thermodynamic stability
+max_formation_energy = -1.0
+
+# Minimum stability score (0.0-1.0)
+min_stability = 0.75
+
+# Required elements for battery cathode
+required_elements = ["Li", "Fe", "Co", "Ni", "Mn", "P", "O"]
+
+# Forbidden toxic/unstable elements
+forbidden_elements = ["Hg", "Pb", "Cd", "As"]
+
+[constraints]
+# Lithium content requirement (molar fraction)
+min_lithium_fraction = 0.1
+
+# Transition metal requirement (at least one of: Fe, Co, Ni, Mn)
+require_transition_metal = true
+
+# Phosphate-based compounds preferred
+prefer_phosphate = true
+
+[analysis]
+# Output telemetry
+output_telemetry = "telemetry_materials.jsonl"
+
+# Synthesis feasibility threshold
+min_synthesis_confidence = 0.6

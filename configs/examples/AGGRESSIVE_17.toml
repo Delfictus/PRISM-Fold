@@ -1,0 +1,130 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# AGGRESSIVE 17-COLOR CONFIG - BALANCED FOR RESULTS WITHOUT FREEZING
+# ═══════════════════════════════════════════════════════════════════════════
+# Chemical Potential μ=0.5 with practical iteration counts
+# Target: 17-19 colors in reasonable time
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = true
+rl_learning_rate = 0.03
+rl_discount_factor = 0.99
+rl_discretization_mode = "extended"
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.15
+dsatur_ratio = 0.70  # DSatur is best for DSJC125.5
+random_ratio = 0.15
+anchor_fraction = 0.35  # Lock good vertices
+
+[phase0_dendritic]
+enabled = true
+num_branches = 10
+branch_depth = 6
+learning_rate = 0.015
+activation_threshold = 0.38
+plasticity = 0.90
+gpu_enabled = true
+
+[phase1_active_inference]
+enabled = true
+prior_precision = 3.0
+likelihood_precision = 4.0
+learning_rate = 0.15
+free_energy_threshold = 0.05
+num_iterations = 150
+
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 2.0  # Lower to preserve colors with μ=0.5
+final_temperature = 0.002
+cooling_rate = 0.90
+steps_per_temp = 100
+compaction_enabled = true
+compaction_threshold = 0.08
+
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.12  # Lower with high chemical potential
+coupling_strength = 8.0  # Very strong anti-ferromagnetic
+max_colors = 17  # EXACT TARGET - Must be 17 or less!
+num_qubits = 125
+use_complex_amplitudes = true
+evolution_iterations = 300
+transverse_field = 1.2
+interference_decay = 0.008
+schedule_type = "exponential"
+stochastic_measurement = true
+
+[phase3_pimc]
+enabled = true
+num_replicas = 50
+dimensions = 125
+beta = 3.5  # Higher for stronger compression
+delta_tau = 0.06
+transverse_field = 1.2
+coupling_strength = 2.5
+mc_steps = 200
+use_sparse = false  # Dense mode (sparse not implemented)
+gpu_enabled = true
+
+[phase4_geodesic]
+enabled = true
+distance_threshold = 3
+centrality_weight = 1.8
+gpu_enabled = true
+
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 150
+flow_strength = 0.45
+diffusion_rate = 0.22
+
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.40
+max_dimension = 2
+coherence_cv_threshold = 0.18
+vietoris_rips_radius = 1.8
+gpu_enabled = true
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 24
+exchange_interval = 12
+temperature_range = [0.05, 2.0]  # Focus on low temps
+diversity_weight = 0.25
+consensus_threshold = 0.85
+gpu_enabled = true
+
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 3.0  # Very strong
+feedback_strength = 1.5
+hotspot_threshold = 2
+stress_decay_rate = 0.75
+overlap_penalty = 2.5
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMETIC - AGGRESSIVE BUT WON'T FREEZE
+# ═══════════════════════════════════════════════════════════════════════════
+[memetic]
+enabled = true
+population_size = 80   # Reasonable size
+mutation_rate = 0.10   # Lower to preserve good solutions
+crossover_rate = 0.90  # High crossover
+elite_fraction = 0.35  # Keep best solutions
+max_generations = 300  # Enough for convergence but won't freeze
+local_search_intensity = 0.85  # High local search
+tournament_size = 5
+convergence_threshold = 100  # Stop if no improvement for 100 gens
+
+[telemetry]
+enabled = true
+capture_all_phases = true
+
+[logging]
+level = "info"

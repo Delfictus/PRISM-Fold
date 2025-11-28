@@ -1,0 +1,36 @@
+# Phase 2 Precise Configuration - Quality-Focused
+#
+# Strategy: Full iteration count with tighter temperature range for precision
+# Use case: Thorough annealing to potentially hit 40-color GPU baseline
+#
+# Expected: Slower per-attempt (~24s), higher quality solutions, potential to
+# break 41-color GPU baseline barrier
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+enabled = true
+population_size = 128
+generations = 500
+crossover_rate = 0.8
+mutation_rate = 0.06          # Enhanced exploration (from Run 2)
+local_search_iterations = 150  # Enhanced exploitation (from Run 2)
+elitism_count = 10
+selection_strategy = "tournament"
+tournament_size = 5
+maintain_diversity = true
+convergence_threshold = 50
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# PRECISE PROFILE: 10K iterations, tighter temp range, more replicas
+iterations = 10000             # Full baseline iterations
+replicas = 10                  # More temperature schedules
+temp_min = 0.0005              # Very low floor for fine-tuning
+temp_max = 8.0                 # Lower ceiling for controlled exploration

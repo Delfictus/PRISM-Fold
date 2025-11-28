@@ -1,0 +1,117 @@
+# Quick Test Config for RTX 5070 (8GB VRAM)
+# Fast 30-minute run to test all GPU phases
+
+profile = "quick_test_rtx5070"
+version = "1.0.0"
+target_chromatic = 100
+deterministic = true
+seed = 42
+max_runtime_hours = 0.5  # 30 minutes
+
+[cpu]
+threads = 24
+pin_pool = false
+work_steal = true
+parallel_io = true
+
+[initial_coloring]
+strategy = "spectral"
+
+[gpu]
+device_id = 0
+streams = 4
+stream_mode = "parallel"
+batch_size = 4096
+enable_reservoir_gpu = true
+enable_te_gpu = true
+enable_statmech_gpu = true
+enable_quantum_gpu = true
+enable_pimc_gpu = false
+enable_thermo_gpu = true
+enable_tda_gpu = false
+
+[orchestrator]
+use_reservoir_prediction = true
+use_active_inference = true
+use_transfer_entropy = true
+use_geodesic_features = false  # Skip to save time
+use_thermodynamic_equilibration = true
+use_pimc = false
+use_quantum_classical_hybrid = true
+use_gnn_screening = false
+use_adp_learning = true
+use_tda = false
+use_multiscale_analysis = false
+use_ensemble_consensus = true
+restarts = 1  # Single run for testing
+early_stop_no_improve_iters = 3
+checkpoint_minutes = 10
+adp_dsatur_depth = 10000
+adp_quantum_iterations = 10
+adp_thermo_num_temps = 24
+
+[neuromorphic]
+enabled = true
+reservoir_size = 1000
+spectral_radius = 0.9
+leak_rate = 0.3
+input_scaling = 0.5
+
+[dsatur]
+geodesic_weight = 0.0
+reservoir_weight = 0.5
+ai_weight = 0.5
+tie_break = "quantum_then_thermo"
+
+[quantum]
+iterations = 10       # Reduced for quick test
+target_chromatic = 100
+depth = 6
+attempts = 128        # Reduced
+beta = 0.95
+temperature = 0.7
+
+[memetic]
+population_size = 64  # Reduced
+elite_size = 4
+generations = 200     # Reduced
+mutation_rate = 0.09
+tournament_size = 3
+local_search_depth = 2000  # Reduced
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+[thermo]
+replicas = 24         # Reduced for quick test
+num_temps = 24        # Reduced
+exchange_interval = 20
+t_min = 0.001
+t_max = 10.0
+steps_per_temp = 2000  # Reduced
+batch_size = 1000
+damping = 0.02
+schedule = "geometric"
+
+[pimc]
+replicas = 24
+beads = 24
+beta = 1.0
+tau = 0.1
+steps = 5000
+
+[adp]
+epsilon = 0.3
+epsilon_decay = 0.995
+epsilon_min = 0.05
+alpha = 0.1
+gamma = 0.95
+
+[iterative]
+enabled = false  # Disable for quick test
+max_passes = 1
+min_delta = 1
+
+[hypertune]
+enabled = false  # Disable for quick test
+stall_threshold = 100
+efficiency_threshold = 0.5

@@ -1,0 +1,56 @@
+# Run 4: Phase2 Precise + Enhanced Memetic (256 attempts)
+#
+# Strategy: Fix config bug, use precise Phase 2 annealing with enhanced memetic
+# to recover/beat Run 2's 38-color result.
+#
+# Config Bug Fix:
+# - Previous runs used hardcoded Phase 2 defaults (10K iter, 8 replicas, temp_max=10.0)
+# - Fixed: TOML [phase2] now correctly overrides CLI defaults
+# - Verification: Phase 2 logs will show "Configured hyperparameters" matching TOML
+#
+# Phase 2 Precise Profile:
+# - iterations=10000: Full annealing depth (baseline, ~24s/attempt)
+# - replicas=10: More temperature schedules for better exploration
+# - temp_min=0.0005: Very low floor for fine-grained exploitation
+# - temp_max=8.0: Lower ceiling for controlled exploration (vs 10.0/12.0)
+# - Expected GPU time: ~100 minutes (24s × 256)
+#
+# Memetic Enhanced Profile:
+# - mutation_rate=0.07: +17% from Run 2 (0.06) for more exploration
+# - local_search=200: +33% from Run 2 (150) for better exploitation
+# - Note: Adaptive mutation (+0.01 when 10 gens stall) applied manually
+#
+# Expected Outcomes:
+# 1. Verify config bug fix: Phase 2 logs show iterations=10000, replicas=10
+# 2. GPU diversity: Check if precise profile produces baselines < 41 colors
+# 3. Target: Match/beat Run 2's 38 colors with correct config
+# 4. Hypothesis: Better Phase 2 tuning + enhanced memetic = consistent 38 or better
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+enabled = true
+population_size = 128
+generations = 500
+crossover_rate = 0.8
+mutation_rate = 0.07           # Enhanced +17% from Run 2
+local_search_iterations = 200  # Enhanced +33% from Run 2
+elitism_count = 10
+selection_strategy = "tournament"
+tournament_size = 5
+maintain_diversity = true
+convergence_threshold = 50
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# PRECISE PROFILE: Full iterations, more replicas, tighter temp range
+iterations = 10000       # Full baseline (confirmed via config fix)
+replicas = 10            # More schedules for diversity
+temp_min = 0.0005        # Very low floor for exploitation
+temp_max = 8.0           # Lower ceiling for controlled exploration

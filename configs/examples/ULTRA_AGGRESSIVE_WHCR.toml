@@ -1,0 +1,350 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# ULTRA-AGGRESSIVE WHCR-INTEGRATED CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+# Target: DSJC125.5 - 17 COLORS WITH ZERO CONFLICTS (WORLD RECORD)
+#
+# STRATEGY: Maximum aggression across all phases with WHCR repair checkpoints
+# - WHCR enabled at Phase 2, 3, 5, and 7 boundaries for conflict resolution
+# - Extreme chemical potential (μ=0.9) for maximum color reduction
+# - Extended quantum evolution for conflict elimination
+# - Massive memetic population for exhaustive search
+# - Full GPU acceleration on all compute-intensive operations
+#
+# EXPECTED OUTCOME: 17 colors, 0 conflicts, geometric stress < 0.3
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 5                    # Multiple attempts for world record
+enable_fluxnet_rl = true            # RL-based adaptive optimization
+rl_learning_rate = 0.028            # Balanced learning rate
+rl_discount_factor = 0.99           # Long-term reward optimization
+rl_discretization_mode = "extended" # Full 65536 state space
+rl_exploration_epsilon = 0.12       # Moderate exploration
+rl_replay_buffer_size = 15000       # Large experience buffer
+rl_batch_size = 64                  # Efficient batch training
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHCR MULTI-PHASE INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+# WHCR is invoked automatically by the orchestrator at strategic checkpoints:
+# - After Phase 2: Early conflict repair with dendritic + AI guidance
+# - After Phase 3 → Phase 4: Quantum conflict cleanup with stress geometry
+# - At Phase 5: Checkpoint repair with full geodesic geometry
+# - After Phase 7: Final polish with complete multi-phase geometry
+#
+# WHCR uses GPU-accelerated wavelet-hierarchical V-cycle repair:
+# - Mixed precision (f32 coarse, f64 fine levels)
+# - Geometry coupling from all preceding phases
+# - Adaptive color budget (tighter at later phases)
+# - Dendritic reservoir guidance for intelligent move selection
+# ═══════════════════════════════════════════════════════════════════════════
+
+[whcr]
+enabled = true                      # Enable WHCR multi-phase integration
+max_iterations_per_level = 150      # Increased from 100 - deeper V-cycles
+precision_mode = "mixed"            # f32 coarse → f64 fine (GPU optimized)
+enable_dendritic = true             # Dendritic reservoir guidance ENABLED
+color_addition_budget = 5           # Allow up to 5 color additions at Phase 2
+dendritic_guidance_weight = 0.35    # Strong dendritic influence on move selection
+wavelet_levels = 4                  # 4-level hierarchical decomposition
+geometry_coupling_strength = 1.8    # Strong coupling to stress/persistence/beliefs
+stress_hotspot_threshold = 0.8      # Prioritize vertices with stress > 0.8
+coarse_solve_tolerance = 1e-3       # Aggressive coarse solver
+fine_solve_tolerance = 1e-6         # Tight fine-level convergence
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WARMSTART: Aggressive DSatur for 17-Color Initialization
+# ═══════════════════════════════════════════════════════════════════════════
+[warmstart]
+enabled = true
+greedy_ratio = 0.05                 # Minimal greedy (tends to high colors)
+dsatur_ratio = 0.85                 # MAXIMUM DSatur (best for chromatic number)
+random_ratio = 0.10                 # Minimal randomness
+anchor_fraction = 0.45              # Lock 45% of highest-quality vertices
+quality_threshold = 0.90            # Very high quality requirement
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 0: DENDRITIC RESERVOIR - Neuromorphic Pattern Recognition
+# ═══════════════════════════════════════════════════════════════════════════
+# Feeds geometry signals to WHCR dendritic guidance system
+# ═══════════════════════════════════════════════════════════════════════════
+[phase0_dendritic]
+enabled = true
+num_branches = 14                   # Maximum branch capacity
+branch_depth = 8                    # Deep hierarchical learning
+learning_rate = 0.022               # Balanced adaptation
+activation_threshold = 0.30         # Very sensitive detection
+plasticity = 0.95                   # Maximum synaptic plasticity
+spike_frequency = 140.0             # High spiking rate
+refractory_period = 1.5             # Fast recovery
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 1: ACTIVE INFERENCE - Bayesian Belief Propagation
+# ═══════════════════════════════════════════════════════════════════════════
+# Provides belief distributions to WHCR for informed move selection
+# ═══════════════════════════════════════════════════════════════════════════
+[phase1_active_inference]
+enabled = true
+prior_precision = 3.5               # Strong priors
+likelihood_precision = 4.5          # High confidence
+learning_rate = 0.13                # Moderate belief updates
+free_energy_threshold = 0.035       # Tight convergence
+num_iterations = 120                # Efficient iterations
+belief_propagation_rounds = 9       # Deep message passing
+uncertainty_weight = 0.22           # Balanced exploration
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 2: THERMODYNAMIC ANNEALING - Ultra-Aggressive Compression
+# ═══════════════════════════════════════════════════════════════════════════
+# CRITICAL: Chemical potential μ=0.9 in quantum.cu kernel (line 431)
+# Target: Reduce to 17-19 colors before WHCR-Phase2 repair
+# WHCR-Phase2 checkpoint will repair any conflicts introduced
+# ═══════════════════════════════════════════════════════════════════════════
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 8.5           # VERY high start for exploration
+final_temperature = 0.0005          # Ultra-low final T
+cooling_rate = 0.915                # Slower cooling for equilibration
+steps_per_temp = 150                # INCREASED - more steps per temperature
+compaction_enabled = true
+compaction_threshold = 0.10         # Trigger compaction aggressively
+compaction_factor = 0.88            # Target 88% compression (AGGRESSIVE)
+replica_exchange_interval = 20      # Moderate replica exchange
+num_replicas = 12                   # Multiple temperature chains
+adaptive_compaction = true          # Dynamic compaction adjustment
+gpu_enabled = true
+
+# Guard trigger management:
+# Expected guard_triggers: 120-160 (with μ=0.9 chemical potential)
+# WHCR-Phase2 will repair any resulting conflicts while preserving low colors
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3: QUANTUM-CLASSICAL HYBRID - Maximum Conflict Reduction
+# ═══════════════════════════════════════════════════════════════════════════
+# CRITICAL SETTINGS FROM TELEMETRY ANALYSIS:
+# - coupling_strength = 10.0 (stronger than baseline 8.0)
+# - evolution_time = 0.20 (extended from 0.15 for settling)
+# - evolution_iterations = 600 (DOUBLED from 300)
+# - transverse_field = 2.2 (INCREASED tunneling)
+#
+# WHCR-Phase3 checkpoint (after Phase 4) will repair with stress geometry
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.20               # Extended evolution for conflict resolution
+coupling_strength = 10.0            # STRONG antiferromagnetic coupling
+max_colors = 18                     # Allow 18 colors (target 17 after WHCR)
+num_qubits = 125                    # Match graph size
+use_complex_amplitudes = true       # Complex quantum interference
+evolution_iterations = 600          # DOUBLED from baseline (extensive refinement)
+transverse_field = 2.2              # INCREASED tunneling (from 2.0)
+interference_decay = 0.004          # Reduced decay (preserve coherence)
+schedule_type = "exponential"       # Smooth exponential annealing
+stochastic_measurement = true       # Symmetry breaking (critical)
+entanglement_threshold = 0.78       # High entanglement
+coherence_time = 140.0              # Extended coherence window
+
+# Expected outcomes before WHCR:
+# - purity: 0.94-0.97
+# - entanglement: 0.85-1.0
+# - num_colors: 17-18
+# - conflicts: 0-20 (WHCR-Phase3 will eliminate)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3B: PIMC - Path Integral Monte Carlo
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_pimc]
+enabled = true
+num_replicas = 64                   # Large replica ensemble
+dimensions = 125                    # Match graph size
+beta = 4.0                          # Strong quantum effects
+delta_tau = 0.040                   # Fine time slicing
+transverse_field = 2.2              # Match Phase 3
+coupling_strength = 2.8             # Inter-replica coupling
+mc_steps = 220                      # Deep MC sampling
+use_sparse = false                  # Dense computation
+gpu_enabled = true
+path_integral_order = 3             # Trotter order
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 4: GEODESIC DISTANCES - Manifold Embedding
+# ═══════════════════════════════════════════════════════════════════════════
+# Provides stress geometry to WHCR-Phase3 checkpoint
+# ═══════════════════════════════════════════════════════════════════════════
+[phase4_geodesic]
+enabled = true
+distance_threshold = 2.0            # Tighter neighborhoods
+centrality_weight = 1.6             # Moderate centrality influence
+spectral_gap = 0.13                 # Spectral embedding quality
+laplacian_eigenvectors = 14         # INCREASED - better manifold representation
+gpu_enabled = true
+
+# Expected: stress < 0.5 for valid 17-color solutions
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 5: GEODESIC FLOW - Gradient Flow Dynamics
+# ═══════════════════════════════════════════════════════════════════════════
+# WHCR-Phase5 checkpoint provides mid-pipeline repair opportunity
+# ═══════════════════════════════════════════════════════════════════════════
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 110               # Moderate flow (avoid over-smoothing)
+flow_strength = 0.38                # Balanced strength
+diffusion_rate = 0.19               # Moderate diffusion
+momentum = 0.93                     # High momentum
+adaptive_step_size = true           # Dynamic timesteps
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 6: TDA - Topological Data Analysis
+# ═══════════════════════════════════════════════════════════════════════════
+# Provides persistence geometry to WHCR
+# ═══════════════════════════════════════════════════════════════════════════
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.28        # Cleaner topology
+max_dimension = 2                   # H0, H1, H2 only
+coherence_cv_threshold = 0.11       # Tight coherence
+vietoris_rips_radius = 1.3          # Focused structure
+persistence_diagram_points = 90     # Good resolution
+wasserstein_distance = true         # Topology comparison
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 7: ENSEMBLE EXCHANGE - Replica Population Diversity
+# ═══════════════════════════════════════════════════════════════════════════
+# WHCR-Phase7 provides final polishing with complete geometry
+# CRITICAL: Must produce multiple diverse 17-color candidates
+# ═══════════════════════════════════════════════════════════════════════════
+[phase7_ensemble]
+enabled = true
+num_replicas = 40                   # LARGE ensemble (from 32)
+exchange_interval = 5               # FREQUENT mixing
+temperature_range = [0.0003, 2.0]   # Wide temperature range
+diversity_weight = 0.50             # MAXIMUM diversity enforcement
+consensus_threshold = 0.78          # Allow more variation
+replica_selection = "boltzmann"     # Energy-weighted selection
+gpu_enabled = true
+min_candidates = 5                  # Require 5+ diverse solutions
+
+# Expected outcomes after WHCR-Phase7:
+# - num_candidates: 5+
+# - diversity: > 0.40
+# - consensus: ~0.78
+# - All candidates: 17 colors, 0 conflicts
+
+# ═══════════════════════════════════════════════════════════════════════════
+# METAPHYSICAL COUPLING - Deep Phase Integration
+# ═══════════════════════════════════════════════════════════════════════════
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 2.2        # Moderate coupling (WHCR handles stress)
+feedback_strength = 1.4             # Balanced feedback
+hotspot_threshold = 1.3             # Early hotspot detection
+stress_decay_rate = 0.86            # Faster relaxation
+overlap_penalty = 2.2               # Moderate penalty
+curvature_flow = true               # Ricci flow geometry healing
+manifold_dimension = 3              # 3D embedding
+stress_target = 0.45                # Target stress level
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMETIC EVOLUTION - Ultra-Aggressive Conflict Repair
+# ═══════════════════════════════════════════════════════════════════════════
+# Works in CONJUNCTION with WHCR:
+# - Memetic provides evolutionary diversity exploration
+# - WHCR provides geometry-guided wavelet repair at checkpoints
+# - Combined approach: evolutionary search + precise geometric repair
+# ═══════════════════════════════════════════════════════════════════════════
+[memetic]
+enabled = true
+population_size = 120               # MASSIVE population (from 80)
+mutation_rate = 0.12                # Moderate mutation (preserve good solutions)
+crossover_rate = 0.96               # Very high crossover
+elite_fraction = 0.45               # Preserve top 45%
+max_generations = 500               # EXTENSIVE search (from 300)
+local_search_intensity = 0.92       # VERY high local search
+tournament_size = 9                 # Strong selection pressure
+convergence_threshold = 100         # Avoid premature convergence
+adaptive_mutation = true            # Dynamic mutation
+island_model = true                 # Parallel subpopulations
+migration_interval = 12             # Frequent island communication
+repair_conflicts_only = true        # Focus on conflict resolution, not color addition
+
+# Synergy with WHCR:
+# - Memetic explores solution space variations
+# - WHCR at checkpoints ensures geometric consistency
+# - Combined approach achieves both diversity AND quality
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEC - Molecular Emergent Computing
+# ═══════════════════════════════════════════════════════════════════════════
+[mec]
+enabled = true
+num_molecules = 125                 # Match graph size
+temperature = 310.0                 # Slightly elevated temperature
+timestep = 0.0007                   # Fine integration
+num_steps = 1400                    # Extended molecular dynamics
+force_field = "lennard_jones"       # LJ potential
+cutoff_radius = 2.4                 # Interaction range
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TELEMETRY & MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+[telemetry]
+enabled = true
+capture_all_phases = true           # Track all phases
+capture_rl_state = true             # RL metrics
+capture_gpu_metrics = true          # GPU utilization
+capture_quantum_state = true        # Quantum properties
+capture_conflicts = true            # Conflict tracking
+capture_whcr_repairs = true         # WHCR checkpoint metrics
+ndjson_format = true                # NDJSON output
+prometheus_export = false           # Disable for performance
+
+[logging]
+level = "info"                      # Production logging
+log_gpu_kernel_times = true         # Kernel performance
+log_phase_transitions = true        # Phase flow
+log_rl_rewards = true               # RL progress
+log_quantum_evolution = true        # Quantum state
+log_conflicts = true                # Conflict diagnostics
+log_geometry = true                 # Geometric stress
+log_ensemble_diversity = true       # Diversity metrics
+log_whcr_checkpoints = true         # WHCR repair operations
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SUCCESS CRITERIA - WORLD RECORD TARGETS
+# ═══════════════════════════════════════════════════════════════════════════
+# PRIMARY OBJECTIVES:
+# ✓ Final colors: 17 (exact chromatic number)
+# ✓ Conflicts: 0 (fully valid solution)
+# ✓ Geometric stress: < 0.3 (manifold quality)
+# ✓ Ensemble diversity: > 0.40 (population diversity)
+#
+# PHASE-SPECIFIC TARGETS:
+# ✓ Phase 2: Guard triggers 120-160 (high μ=0.9 compression)
+# ✓ WHCR-Phase2: Repair conflicts while maintaining 17-19 colors
+# ✓ Phase 3: Purity > 0.94, entanglement > 0.85, colors 17-18
+# ✓ WHCR-Phase3: Final conflict elimination with stress geometry
+# ✓ Phase 4: Stress < 0.5 (valid geometry)
+# ✓ WHCR-Phase5: Checkpoint verification
+# ✓ Phase 7: 5+ diverse candidates, all 17 colors, 0 conflicts
+# ✓ WHCR-Phase7: Final polish and validation
+#
+# WHCR INTEGRATION FLOW:
+# 1. Phase 0→1→2 → WHCR-Phase2 (dendritic + AI guidance)
+# 2. Phase 3 → Phase 4 → WHCR-Phase3 (quantum + stress geometry)
+# 3. Phase 5 → WHCR-Phase5 (geodesic checkpoint)
+# 4. Phase 6→7 → WHCR-Phase7 (TDA + ensemble final polish)
+#
+# CRITICAL PARAMETERS (must be set externally):
+# ⚠️  GPU Kernel: prism-gpu/src/kernels/quantum.cu line 431
+#    float chemical_potential = 0.9f  (ULTRA-AGGRESSIVE)
+# ⚠️  GPU Kernel: prism-gpu/src/kernels/thermodynamic.cu
+#    Ensure compaction uses factor = 0.88
+# ⚠️  Build: cargo build --release --features cuda
+# ⚠️  PTX: Ensure all PTX kernels compiled for sm_70+
+# ═══════════════════════════════════════════════════════════════════════════

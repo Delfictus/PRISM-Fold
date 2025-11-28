@@ -1,0 +1,139 @@
+# Vertex-Targeted Aggressive Config
+# Specifically tuned to attack hard vertices (547, 900, 538, etc.)
+# Based on neuromorphic reservoir telemetry analysis
+
+profile = "vertex_targeted_aggressive"
+version = "1.0.0"
+target_chromatic = 83
+deterministic = false
+max_runtime_hours = 48.0
+
+[cpu]
+threads = 24
+pin_pool = false
+work_steal = true
+parallel_io = true
+
+[initial_coloring]
+strategy = "spectral"  # Proven: 127 colors
+
+[gpu]
+device_id = 0
+streams = 4
+stream_mode = "parallel"
+batch_size = 4096
+enable_reservoir_gpu = true
+enable_te_gpu = true
+enable_statmech_gpu = true
+enable_quantum_gpu = true
+enable_pimc_gpu = false
+enable_thermo_gpu = true
+enable_tda_gpu = true
+
+[orchestrator]
+use_reservoir_prediction = true
+use_active_inference = true
+use_transfer_entropy = true
+use_geodesic_features = true
+use_thermodynamic_equilibration = true
+use_pimc = false
+use_quantum_classical_hybrid = true
+use_gnn_screening = false
+use_adp_learning = true
+use_tda = true
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+restarts = 1
+early_stop_no_improve_iters = 10
+checkpoint_minutes = 30
+adp_dsatur_depth = 100000      # 2x deeper DSATUR for hard vertices
+adp_quantum_iterations = 60    # More quantum iterations
+adp_thermo_num_temps = 64      # More temperature points
+
+[neuromorphic]
+enabled = true
+reservoir_size = 2000          # BOOSTED from 1500 (33% increase)
+spectral_radius = 0.95         # Higher coupling for better predictions
+leak_rate = 0.2                # Lower leak = more memory
+input_scaling = 0.6
+
+[dsatur]
+geodesic_weight = 0.30
+reservoir_weight = 0.40        # Increased weight on reservoir difficulty
+ai_weight = 0.30
+tie_break = "reservoir_then_quantum"  # Prioritize hard vertices
+
+[transfer_entropy]
+histogram_bins = 128
+time_series_steps = 200
+te_vs_kuramoto_weight = 0.85
+geodesic_weight = 0.35
+
+[quantum]
+iterations = 60                # BOOSTED from 45 (33% increase)
+target_chromatic = 83
+depth = 10                     # BOOSTED from 8 (25% deeper)
+attempts = 1024                # DOUBLED from 512
+beta = 0.98                    # STRONGER quantum effects
+temperature = 0.4              # LOWER temp = tighter annealing
+color_penalty_weight = 0.5     # BOOSTED from 0.1 (5x penalty on colors)
+hard_vertex_penalty = 10.0     # NEW: 10x penalty for conflicts on vertices 547, 900, etc.
+
+[memetic]
+population_size = 512          # BOOSTED from 320 (60% increase)
+elite_size = 16
+generations = 2000             # BOOSTED from 1200 (67% increase)
+mutation_rate = 0.12           # HIGHER mutation
+tournament_size = 5
+local_search_depth = 50000     # BOOSTED from 20K (2.5x deeper)
+hard_vertex_focus = true       # NEW: Focus mutations on hard vertices
+hard_vertex_mutation_rate = 0.30  # NEW: 30% mutation for vertices 547, 900, etc.
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+[thermo]
+replicas = 64                  # BOOSTED from 56 (14% increase)
+num_temps = 64                 # BOOSTED (14% increase)
+exchange_interval = 10         # FASTER exchanges
+t_min = 0.00001                # ULTRA-FINE minimum
+t_max = 20.0                   # HIGHER maximum
+steps_per_temp = 12000         # BOOSTED from 8K (50% increase)
+batch_size = 1000
+damping = 0.01                 # LESS damping = more exploration
+schedule = "geometric"
+hard_vertex_perturbation_boost = 10.0  # NEW: 10x perturbation for vertices 547, etc.
+shake_interval = 50            # NEW: Shake every 50 steps
+shake_target = "hard_vertices" # NEW: Target vertices 547, 900, 538
+
+[pimc]
+replicas = 48
+beads = 48
+beta = 1.0
+tau = 0.1
+steps = 20000
+
+[adp]
+epsilon = 0.4                  # MORE exploration
+epsilon_decay = 0.998          # SLOWER decay
+epsilon_min = 0.08             # HIGHER minimum (more random exploration)
+alpha = 0.15                   # FASTER learning
+gamma = 0.97
+
+[iterative]
+enabled = true
+max_passes = 5                 # BOOSTED from 4
+min_delta = 0
+escalation_strategy = "hard_vertex_focus"  # NEW: Each pass focuses more on hard vertices
+
+[hypertune]
+enabled = true
+stall_threshold = 150
+efficiency_threshold = 0.3     # More sensitive to inefficiency
+hard_vertex_monitoring = true  # NEW: Track conflicts on vertices 547, 900, etc.
+
+[tda]
+enabled = true
+use_gpu = true
+persistence_depth = 4          # BOOSTED from 3
+clique_search_depth = 2000     # DOUBLED
+hard_vertex_analysis = true    # NEW: Analyze topology around vertices 547, 900, etc.

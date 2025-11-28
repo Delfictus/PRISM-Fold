@@ -1,0 +1,147 @@
+# DSJC500.5 Quantum-Stable Configuration
+#
+# Target: Fix Phase 3 quantum collapse to achieve 48-50 colors instead of 70
+#
+# Problem Diagnosis:
+# - Phase 3 collapsed to chromatic_number=1 with 62624 conflicts
+# - Quantum parameters causing all vertices to collapse to single color
+# - Need to stabilize quantum evolution and strengthen conflict penalties
+#
+# Physics Parameter Fixes:
+# 1. Phase 2: Increase temp_max to 50.0 (from 10.0) for better exploration
+# 2. Phase 2: Increase replicas to 32 (from 8) for more thorough sampling
+# 3. Phase 3: Increase coupling_strength to 2.5 (from 1.0) to punish conflicts
+# 4. Phase 3: Decrease evolution_time to 0.5 (from 1.0) to reduce quantum fluctuations
+#
+# Expected Outcome:
+# - Phase 2 provides better initial solution (~60 colors)
+# - Phase 3 refines to ~55 colors without collapse
+# - Phase 4 APSP (already 40x faster than spec) polishes to 48-49 colors
+#
+# Usage:
+#   timeout 120 ./target/release/prism-cli \
+#     --input benchmarks/dimacs/DSJC500.5.col \
+#     --config configs/dsjc500_quantum_stable.toml \
+#     --telemetry telemetry_dsjc500_stable.jsonl
+
+[graph]
+name = "DSJC500.5"
+vertices = 500
+edges = 62624
+density = 0.501
+expected_chromatic = 48
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+timeout_seconds = 600
+enable_telemetry = true
+telemetry_path = "telemetry_dsjc500_stable.jsonl"
+
+[gpu]
+enabled = true
+device_id = 0
+ptx_dir = "target/ptx"
+allow_nvrtc = false
+require_signed_ptx = false
+nvml_poll_interval_ms = 1000
+
+[warmstart]
+enabled = true
+max_colors = 60                 # Conservative initial color space for dense graph
+anchor_fraction = 0.10          # 50 structural anchors
+flux_weight = 0.4
+ensemble_weight = 0.4
+random_weight = 0.2
+
+[warmstart.dendritic]
+branches = 4
+depth = 3
+learn_rate = 0.01
+sparsity = 0.3
+integration_mode = "gated"
+
+[phase2]
+# CRITICAL FIX: Increase temperature range and replicas
+# Previous: iterations=5000, replicas=8, temp_max=10.0
+# Now: More replicas for parallel tempering, higher temp_max for exploration
+enabled = true
+iterations = 10000              # 2x iterations for 500-vertex graph
+replicas = 32                   # Increased from 8 to 32 for better sampling
+temp_min = 0.001
+temp_max = 50.0                 # Increased from 10.0 to 50.0 for dense graph exploration
+cooling_rate = 0.98
+swap_interval = 100
+
+[phase3_quantum]
+# CRITICAL FIX: Stabilize quantum evolution parameters
+# Previous: evolution_time=1.0, coupling_strength=1.0 (defaults)
+# Issue: Weak coupling + high fluctuations = collapse to single color
+# Fix: Reduce fluctuations, increase conflict penalty, enable complex amplitudes
+enabled = true
+evolution_time = 0.5            # Reduced from 1.0 to 0.5 (less violent quantum fluctuations)
+coupling_strength = 2.5         # Increased from 1.0 to 2.5 (stronger conflict penalty)
+max_colors = 60                 # Match warmstart color space
+num_qubits = 500
+
+# Complex Quantum Evolution (NEW)
+use_complex_amplitudes = true   # Enable interference effects for better exploration
+evolution_iterations = 150      # Multi-step annealing schedule (100-200 recommended)
+transverse_field = 1.2          # Quantum tunneling strength (0.5-2.0 range)
+interference_decay = 0.02       # Decoherence rate (0.01-0.05 typical)
+schedule_type = "exponential"   # Annealing schedule: "linear", "exponential", or "custom"
+stochastic_measurement = false  # Deterministic measurement (set true for RNG-based collapse)
+
+[phase4_apsp]
+# Phase 4 already performing excellently (0.037s vs 1.5s spec target)
+# No changes needed - GPU Floyd-Warshall is 40x faster than required
+enabled = true
+use_gpu = true
+
+[phase6_tda]
+enabled = true
+filtration_steps = 100
+persistence_threshold = 0.1
+
+[phase7_memetic]
+enabled = true
+population_size = 50
+generations = 100
+mutation_rate = 0.15
+crossover_rate = 0.7
+
+[rl]
+# FluxNet RL configuration
+enabled = true
+epsilon = 0.2
+alpha = 0.05
+gamma = 0.99
+replay_buffer_size = 10000
+replay_batch_size = 32
+discretization_mode = "compact"
+
+[metaphysical_coupling]
+# Enable geometry-aware coupling for stress-based phase adjustments
+enabled = true
+enable_early_phase_seeding = true
+enable_reward_shaping = true
+reward_shaping_scale = 2.0
+stress_hot_threshold = 0.5
+stress_critical_threshold = 0.8
+warmstart_bias_weight = 2.0
+memetic_hotspot_boost = 2.0
+phase1_exploration_boost = 1.5
+phase2_temp_alpha = 0.5
+reward_log_threshold = 0.001
+
+[telemetry]
+enabled = true
+output_dir = "results/dsjc500_stable"
+format = "ndjson"
+prometheus_enabled = false
+sqlite_enabled = true
+sqlite_path = "results/dsjc500_stable.db"
+
+[logging]
+level = "info"
+file = "results/dsjc500_stable.log"

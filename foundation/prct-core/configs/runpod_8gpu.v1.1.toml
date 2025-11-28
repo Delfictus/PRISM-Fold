@@ -1,0 +1,66 @@
+# RunPod 8-GPU Configuration v1.1
+# Aggressive thermodynamic warm start for DSJC1000.5
+# Target: ≤82 colors (world record)
+
+[system]
+name = "runpod_8gpu_v1.1"
+description = "8-GPU RunPod configuration with aggressive thermodynamic settings"
+gpu_count = 8
+cuda_enabled = true
+
+[solver]
+algorithm = "prism_hybrid"
+max_iterations = 100000
+target_chromatic = 82
+enable_warm_start = true
+enable_backtracking = true
+
+[thermo]
+# Thermodynamic replica exchange settings
+replicas = 96
+num_temps = 96
+exchange_interval = 15
+t_min = 0.005
+t_max = 16.0
+steps_per_temp = 12000  # Raised from 5000 for aggressive warm start
+aggressive_midband = true  # Force 4× step burn-in
+
+[thermo.compaction]
+# Color compaction parameters
+force_start_temp = 9
+max_force_blend_factor = 0.4
+color_range_expand_threshold = 0.2
+color_range_expand_percent = 15
+reheat_consecutive_guards = 3
+reheat_temp_boost = 1.5
+
+[dsatur]
+# DSATUR backtracking configuration
+max_colors = 82
+enable_warm_start_adjustment = true  # Auto-adjust max_colors from warm start
+backtrack_depth = 100
+branching_strategy = "saturation_degree"
+
+[gpu]
+# GPU memory and parallelization settings
+device_ids = [0, 1, 2, 3, 4, 5, 6, 7]
+memory_per_device_gb = 24
+enable_peer_access = true
+concurrent_kernels = true
+streams_per_device = 4
+
+[optimization]
+# Advanced optimization features
+enable_quantum_tabu = true
+enable_neuromorphic = true
+enable_multilevel_kempe = true
+enable_adaptive_tuning = true
+population_size = 100
+quantum_field_strength = 0.5
+
+[logging]
+level = "info"
+progress_interval_seconds = 30
+checkpoint_interval_iterations = 1000
+save_best_solutions = true
+output_dir = "results/dsjc1000"

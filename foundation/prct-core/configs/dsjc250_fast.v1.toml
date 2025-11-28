@@ -1,0 +1,122 @@
+# DSJC250.5 Fast Configuration v1
+# Aggressive settings for medium-sized benchmark
+# Target: Fast convergence with high-quality solutions
+
+profile = "dsjc250_fast_v1"
+version = "1.1.0"
+target_chromatic = 28
+deterministic = false
+seed = 250_250_250
+max_runtime_hours = 12.0
+num_workers = 16
+
+use_reservoir_prediction = true
+use_active_inference = true
+use_gpu_active_inference = true
+use_adp_learning = true
+use_transfer_entropy = true
+use_thermodynamic_equilibration = true
+use_quantum_classical_hybrid = true
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+use_geodesic_features = true
+use_tda = true
+
+[system]
+name = "dsjc250_fast_v1"
+description = "Fast aggressive configuration for DSJC250.5"
+gpu_count = 1
+cuda_enabled = true
+
+[solver]
+algorithm = "prism_hybrid"
+max_iterations = 50000
+target_chromatic = 28  # Known best for DSJC250.5
+enable_warm_start = true
+enable_backtracking = true
+
+[thermo]
+# Aggressive thermodynamic settings for fast convergence
+replicas = 48
+num_temps = 64
+exchange_interval = 10
+t_min = 0.01
+t_max = 8.0
+steps_per_temp = 20000  # Higher iterations for early temperature burn-in
+aggressive_midband = true  # Force 4× step burn-in
+force_start_temp = 5.0
+force_full_strength_temp = 1.0
+
+[thermo.compaction]
+# Color compaction tuned for DSJC250
+max_force_blend_factor = 0.25
+color_range_expand_threshold = 0.10
+color_range_expand_percent = 3
+reheat_consecutive_guards = 3
+reheat_temp_boost = 1.4
+initial_slack = 45
+min_slack = 30
+max_slack = 90
+
+[dsatur]
+# DSATUR backtracking for DSJC250
+max_colors = 35  # Upper bound
+enable_warm_start_adjustment = true
+backtrack_depth = 75
+branching_strategy = "saturation_degree"
+
+[gpu]
+# Single GPU configuration
+device_ids = [0]
+memory_per_device_gb = 16
+enable_peer_access = false
+concurrent_kernels = true
+streams_per_device = 2
+enable_tda_gpu = true
+
+[optimization]
+# Balanced optimization for medium graphs
+enable_quantum_tabu = true
+enable_neuromorphic = true
+enable_multilevel_kempe = true
+enable_adaptive_tuning = true
+population_size = 64
+quantum_field_strength = 0.4
+
+[logging]
+level = "info"
+progress_interval_seconds = 15
+checkpoint_interval_iterations = 500
+save_best_solutions = true
+output_dir = "results/dsjc250"
+
+[fluxnet]
+enabled = true
+memory_tier = "compact"
+verbose = true
+
+[fluxnet.force_profile]
+strong_multiplier = 1.5
+weak_multiplier = 0.7
+force_clamp_min = 0.5
+force_clamp_max = 2.0
+strong_percentile = 0.2
+weak_percentile = 0.2
+
+[fluxnet.rl]
+learning_rate = 0.05
+discount_factor = 0.95
+epsilon_start = 0.8
+epsilon_decay = 0.995
+epsilon_min = 0.05
+reward_conflict_weight = 1.0
+reward_color_weight = 0.5
+reward_compaction_weight = 0.3
+qtable_states = 4096
+
+[fluxnet.persistence]
+cache_dir = "target/fluxnet_cache"
+save_interval_temps = 5
+load_pretrained = true
+pretrained_path = "target/fluxnet_cache/qtable_final.bin"
+save_final = true

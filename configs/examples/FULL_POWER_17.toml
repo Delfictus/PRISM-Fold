@@ -1,0 +1,216 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# FULL POWER CONFIGURATION - ALL FEATURES ENABLED
+# ═══════════════════════════════════════════════════════════════════════════
+# Chemical Potential μ=0.7 + ALL innovative features
+# FluxNet RL, Dendritic, Active Inference, Complex Quantum, PIMC, TDA, etc.
+# Tuned to complete in ~60-90 seconds without freezing
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = true         # FLUXNET RL ENABLED - Universal controller
+rl_learning_rate = 0.035         # Aggressive learning
+rl_discount_factor = 0.99        # Long-term optimization
+rl_discretization_mode = "extended"  # 65536 state space (maximum)
+rl_exploration_epsilon = 0.15   # Balanced exploration
+rl_replay_buffer_size = 10000   # Large experience replay
+rl_batch_size = 128              # Efficient batch learning
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WARMSTART: Advanced Initialization
+# ═══════════════════════════════════════════════════════════════════════════
+[warmstart]
+enabled = true
+greedy_ratio = 0.10
+dsatur_ratio = 0.75              # DSatur dominates for dense graphs
+random_ratio = 0.15
+anchor_fraction = 0.40           # Lock 40% best vertices
+quality_threshold = 0.85        # High quality requirement
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 0: DENDRITIC RESERVOIR - Neuromorphic Computing (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase0_dendritic]
+enabled = true                   # NEUROMORPHIC ENABLED
+num_branches = 12                # Maximum dendrite branches
+branch_depth = 7                 # Deep hierarchical processing
+learning_rate = 0.018            # Fast adaptation
+activation_threshold = 0.35      # Sensitive neurons
+plasticity = 0.92                # High synaptic plasticity
+spike_frequency = 100.0          # High frequency spiking
+refractory_period = 2.0          # Short refractory
+gpu_enabled = true               # GPU-accelerated reservoir
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 1: ACTIVE INFERENCE - Bayesian Decision Making (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase1_active_inference]
+enabled = true                   # BAYESIAN INFERENCE ENABLED
+prior_precision = 3.5            # Strong priors
+likelihood_precision = 4.5       # High confidence
+learning_rate = 0.15             # Fast belief updates
+free_energy_threshold = 0.04     # Tight convergence
+num_iterations = 120             # Reasonable iterations
+belief_propagation_rounds = 10  # Message passing rounds
+uncertainty_weight = 0.3         # Balance exploration
+gpu_enabled = true               # GPU acceleration
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 2: THERMODYNAMIC - Simulated Annealing with μ=0.7
+# ═══════════════════════════════════════════════════════════════════════════
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.8        # Lower for μ=0.7 stability
+final_temperature = 0.001        # Ultra-low final temp
+cooling_rate = 0.93              # Smooth cooling
+steps_per_temp = 60              # Balanced steps
+compaction_enabled = true        # State space compression
+compaction_threshold = 0.06      # Aggressive compaction
+replica_exchange_interval = 20   # Parallel tempering
+num_replicas = 12                # Multiple temperature chains
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3: COMPLEX QUANTUM EVOLUTION - Full Quantum Features
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_quantum]
+enabled = true                   # QUANTUM ENABLED
+gpu_enabled = true
+evolution_time = 0.10            # Tuned for μ=0.7
+coupling_strength = 9.0          # Maximum anti-ferromagnetic
+max_colors = 17                  # EXACT TARGET - Must allow 17!
+num_qubits = 125
+use_complex_amplitudes = true    # COMPLEX QUANTUM (interference)
+evolution_iterations = 250       # Good depth
+transverse_field = 1.0           # Balanced tunneling
+interference_decay = 0.005       # Slow decoherence
+schedule_type = "exponential"    # Smooth annealing
+stochastic_measurement = true    # Symmetry breaking
+entanglement_threshold = 0.7     # High entanglement
+coherence_time = 100.0           # Long coherence
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3B: PIMC - Path Integral Monte Carlo (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_pimc]
+enabled = true                   # PIMC ENABLED
+num_replicas = 64                # Good replica count
+dimensions = 125
+beta = 4.0                       # Strong quantum effects
+delta_tau = 0.04                 # Fine time slicing
+transverse_field = 1.0
+coupling_strength = 3.0          # Strong inter-replica
+mc_steps = 150                   # Reasonable MC steps
+use_sparse = false               # Dense (sparse not implemented)
+gpu_enabled = true
+path_integral_order = 4          # Trotter decomposition order
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 4: GEODESIC DISTANCES - Graph Manifold Learning
+# ═══════════════════════════════════════════════════════════════════════════
+[phase4_geodesic]
+enabled = true                   # GEODESIC ENABLED
+distance_threshold = 2.5         # Tight neighborhoods
+centrality_weight = 2.0          # Strong centrality
+spectral_gap = 0.1               # Spectral clustering
+laplacian_eigenvectors = 10     # Manifold dimensions
+gpu_enabled = true               # Floyd-Warshall GPU
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 5: GEODESIC FLOW - Gradient Flow Dynamics
+# ═══════════════════════════════════════════════════════════════════════════
+[phase5_geodesic_flow]
+enabled = true                   # FLOW ENABLED
+flow_iterations = 120            # Good flow depth
+flow_strength = 0.4              # Moderate flow
+diffusion_rate = 0.2             # Color diffusion
+momentum = 0.9                   # Flow momentum
+adaptive_step_size = true        # Dynamic timesteps
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 6: TDA - Topological Data Analysis (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[phase6_tda]
+enabled = true                   # TDA ENABLED
+persistence_threshold = 0.35     # Feature detection
+max_dimension = 3                # Compute H0, H1, H2, H3
+coherence_cv_threshold = 0.15    # Structural coherence
+vietoris_rips_radius = 1.5       # Filtration radius
+persistence_diagram_points = 100 # Diagram resolution
+wasserstein_distance = true      # Topology comparison
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 7: ENSEMBLE EXCHANGE - Parallel Tempering
+# ═══════════════════════════════════════════════════════════════════════════
+[phase7_ensemble]
+enabled = true                   # ENSEMBLE ENABLED
+num_replicas = 28                # Many replicas
+exchange_interval = 8            # Frequent exchanges
+temperature_range = [0.01, 1.8]  # Focus on low temps with μ=0.7
+diversity_weight = 0.2           # Some diversity
+consensus_threshold = 0.90       # High quality requirement
+replica_selection = "boltzmann"  # Weighted selection
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# METAPHYSICAL COUPLING - Deep Geometry Feedback (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[metaphysical_coupling]
+enabled = true                   # GEOMETRY COUPLING ENABLED
+geometry_stress_weight = 3.5     # Maximum stress feedback
+feedback_strength = 1.8          # Strong coupling
+hotspot_threshold = 2            # Early hotspot detection
+stress_decay_rate = 0.70         # Slow relaxation
+overlap_penalty = 3.0            # Heavy edge penalty
+curvature_flow = true            # Ricci flow enabled
+manifold_dimension = 3           # 3D embedding
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMETIC EVOLUTION - Balanced for Speed & Quality
+# ═══════════════════════════════════════════════════════════════════════════
+[memetic]
+enabled = true                   # MEMETIC ENABLED
+population_size = 60             # Medium population
+mutation_rate = 0.08             # Lower mutation (preserve quality)
+crossover_rate = 0.92            # Very high crossover
+elite_fraction = 0.40            # Keep 40% elite
+max_generations = 200            # Limited generations (no freeze)
+local_search_intensity = 0.75    # Strong local search
+tournament_size = 6              # Good selection pressure
+convergence_threshold = 50       # Early stopping
+adaptive_mutation = true         # Dynamic mutation rate
+island_model = true              # Parallel populations
+migration_interval = 20          # Island migration
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEC - Molecular Emergent Computing (ENABLED)
+# ═══════════════════════════════════════════════════════════════════════════
+[mec]
+enabled = true                   # MEC ENABLED
+num_molecules = 125              # Match graph size
+temperature = 300.0              # Room temperature
+timestep = 0.001                 # Fine integration
+num_steps = 1000                 # Molecular dynamics steps
+force_field = "lennard_jones"   # LJ potential
+cutoff_radius = 2.5              # Interaction cutoff
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TELEMETRY & MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+[telemetry]
+enabled = true
+capture_all_phases = true
+capture_rl_state = true          # Track RL learning
+capture_gpu_metrics = true       # GPU utilization
+capture_quantum_state = true     # Quantum telemetry
+ndjson_format = true
+prometheus_export = false        # Disabled for speed
+
+[logging]
+level = "info"
+log_gpu_kernel_times = true      # Track kernel performance
+log_phase_transitions = true     # Phase flow
+log_rl_rewards = true            # RL progress
+log_quantum_evolution = true     # Quantum state

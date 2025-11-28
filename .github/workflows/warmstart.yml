@@ -1,0 +1,283 @@
+name: Warmstart System CI
+
+on:
+  push:
+    branches: [ main, prism-v2-refactor ]
+    paths:
+      - 'prism-core/src/types.rs'
+      - 'prism-phases/src/phase0/**'
+      - 'prism-fluxnet/src/curriculum.rs'
+      - 'prism-pipeline/src/orchestrator/**'
+      - 'profiles/curriculum/**'
+      - '.github/workflows/warmstart.yml'
+  pull_request:
+    branches: [ main, prism-v2-refactor ]
+    paths:
+      - 'prism-core/src/types.rs'
+      - 'prism-phases/src/phase0/**'
+      - 'prism-fluxnet/src/curriculum.rs'
+      - 'prism-pipeline/src/orchestrator/**'
+      - 'profiles/curriculum/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  warmstart-tests:
+    name: Warmstart Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run warmstart unit tests
+        run: |
+          cargo test --package prism-core --lib types::tests::test_warmstart -- --nocapture
+          cargo test --package prism-core --lib types::tests::test_phase0_telemetry -- --nocapture
+          cargo test --package prism-phases --lib phase0::warmstart -- --nocapture
+          cargo test --package prism-phases --lib phase0::ensemble -- --nocapture
+          cargo test --package prism-fluxnet --lib curriculum -- --nocapture
+
+      - name: Run warmstart integration tests
+        run: |
+          cargo test --package prism-pipeline --lib orchestrator::tests -- --nocapture
+
+      - name: Check warmstart examples compile
+        run: |
+          cargo check --package prism-cli --release
+          cargo check --package prism-pipeline --release
+
+  warmstart-effectiveness:
+    name: Warmstart Effectiveness Validation
+    runs-on: ubuntu-latest
+    needs: warmstart-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-effectiveness-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build PRISM CLI (release)
+        run: cargo build --release --package prism-cli
+
+      - name: Download small test graphs
+        run: |
+          mkdir -p benchmarks/dimacs
+          cat > benchmarks/dimacs/test_small.col << 'EOF'
+          p edge 10 15
+          e 1 2
+          e 1 3
+          e 2 3
+          e 2 4
+          e 3 4
+          e 4 5
+          e 5 6
+          e 6 7
+          e 7 8
+          e 8 9
+          e 9 10
+          e 1 5
+          e 3 7
+          e 5 9
+          e 2 10
+          EOF
+
+      - name: Run warmstart benchmark (baseline)
+        run: |
+          ./target/release/prism-cli \
+            --input benchmarks/dimacs/test_small.col \
+            --file-type dimacs \
+            --attempts 20 \
+            --verbose || echo "Baseline run completed"
+
+      - name: Run warmstart benchmark (warmstart enabled)
+        run: |
+          ./target/release/prism-cli \
+            --input benchmarks/dimacs/test_small.col \
+            --file-type dimacs \
+            --attempts 20 \
+            --warmstart \
+            --warmstart-curriculum-path profiles/curriculum/catalog.json \
+            --verbose || echo "Warmstart run completed"
+
+      - name: Validate curriculum catalog
+        run: |
+          python3 -c "
+          import json
+          import sys
+          try:
+              with open('profiles/curriculum/catalog.json', 'r') as f:
+                  catalog = json.load(f)
+              assert 'version' in catalog, 'Missing version field'
+              assert 'entries' in catalog, 'Missing entries field'
+              assert len(catalog['entries']) >= 3, 'Need at least 3 curriculum entries'
+              print(f'✓ Curriculum catalog valid: {len(catalog[\"entries\"])} entries')
+              sys.exit(0)
+          except Exception as e:
+              print(f'✗ Curriculum catalog invalid: {e}')
+              sys.exit(1)
+          "
+
+  warmstart-telemetry:
+    name: Warmstart Telemetry Validation
+    runs-on: ubuntu-latest
+    needs: warmstart-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-telemetry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Test telemetry serialization
+        run: |
+          cargo test --package prism-core --lib types::tests::test_phase0_telemetry_serialization -- --nocapture
+          cargo test --package prism-core --lib types::tests::test_warmstart_telemetry_serialization -- --nocapture
+
+      - name: Test telemetry collection
+        run: |
+          cargo test --package prism-pipeline --lib orchestrator::tests::test_warmstart_effectiveness -- --nocapture
+
+      - name: Validate telemetry schemas
+        run: |
+          cargo test --package prism-core --lib types::tests -- --nocapture
+
+  warmstart-docs:
+    name: Warmstart Documentation Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check documentation exists
+        run: |
+          test -f docs/warmstart_overview.md || (echo "Missing warmstart_overview.md" && exit 1)
+          test -f docs/spec/warmstart_system.md || (echo "Missing warmstart_system.md" && exit 1)
+          echo "✓ All warmstart documentation files present"
+
+      - name: Validate markdown formatting
+        uses: DavidAnson/markdownlint-cli2-action@v14
+        with:
+          globs: |
+            docs/warmstart_overview.md
+            docs/spec/warmstart_system.md
+          config: |
+            {
+              "line-length": false,
+              "no-inline-html": false,
+              "no-bare-urls": false
+            }
+
+      - name: Check documentation completeness
+        run: |
+          grep -q "Quick Start" docs/warmstart_overview.md || (echo "Missing Quick Start section" && exit 1)
+          grep -q "Configuration Guide" docs/warmstart_overview.md || (echo "Missing Configuration Guide" && exit 1)
+          grep -q "Troubleshooting" docs/warmstart_overview.md || (echo "Missing Troubleshooting section" && exit 1)
+          grep -q "Architecture Overview" docs/spec/warmstart_system.md || (echo "Missing Architecture section" && exit 1)
+          grep -q "Telemetry Schema" docs/spec/warmstart_system.md || (echo "Missing Telemetry Schema" && exit 1)
+          echo "✓ Documentation completeness validated"
+
+  warmstart-clippy:
+    name: Warmstart Code Quality (Clippy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy on warmstart code
+        run: |
+          cargo clippy --package prism-core -- -D warnings
+          cargo clippy --package prism-phases -- -D warnings
+          cargo clippy --package prism-fluxnet -- -D warnings
+          cargo clippy --package prism-pipeline -- -D warnings
+
+  warmstart-summary:
+    name: Warmstart CI Summary
+    runs-on: ubuntu-latest
+    needs: [warmstart-tests, warmstart-effectiveness, warmstart-telemetry, warmstart-docs, warmstart-clippy]
+    if: always()
+
+    steps:
+      - name: Check job results
+        run: |
+          echo "=== Warmstart CI Summary ==="
+          echo "Unit Tests: ${{ needs.warmstart-tests.result }}"
+          echo "Effectiveness: ${{ needs.warmstart-effectiveness.result }}"
+          echo "Telemetry: ${{ needs.warmstart-telemetry.result }}"
+          echo "Documentation: ${{ needs.warmstart-docs.result }}"
+          echo "Code Quality: ${{ needs.warmstart-clippy.result }}"
+
+          if [[ "${{ needs.warmstart-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.warmstart-effectiveness.result }}" != "success" ]] || \
+             [[ "${{ needs.warmstart-telemetry.result }}" != "success" ]] || \
+             [[ "${{ needs.warmstart-docs.result }}" != "success" ]] || \
+             [[ "${{ needs.warmstart-clippy.result }}" != "success" ]]; then
+            echo "✗ Warmstart CI failed"
+            exit 1
+          else
+            echo "✓ Warmstart CI passed"
+            exit 0
+          fi

@@ -1,0 +1,36 @@
+# Phase 2 Fast Configuration - Diversity-Focused
+#
+# Strategy: Lower iteration count with higher temperature range for exploration
+# Use case: Maximize GPU population diversity through varied annealing schedules
+#
+# Expected: Faster per-attempt (6K vs 10K = ~14s vs ~24s), more diverse 41-color
+# baselines that give memetic more material to work with
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+enabled = true
+population_size = 128
+generations = 500
+crossover_rate = 0.8
+mutation_rate = 0.06          # Enhanced exploration (from Run 2)
+local_search_iterations = 150  # Enhanced exploitation (from Run 2)
+elitism_count = 10
+selection_strategy = "tournament"
+tournament_size = 5
+maintain_diversity = true
+convergence_threshold = 50
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# FAST PROFILE: 6K iterations, high temp range, fewer replicas
+iterations = 6000              # 40% reduction from baseline (10K → 6K)
+replicas = 6                   # Fewer replicas for speed
+temp_min = 0.003               # Lower floor for better exploitation
+temp_max = 12.0                # Higher ceiling for more exploration

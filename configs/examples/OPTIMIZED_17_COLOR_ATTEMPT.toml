@@ -1,0 +1,126 @@
+# OPTIMIZED CONFIGURATION FOR 17-COLOR WORLD RECORD
+# Target: DSJC125.5 with 17 colors, 0 conflicts
+# Strategy: Reduced quantum conflicts through balanced parameters
+# Date: 2025-11-23
+# Expected: Reduce Phase 3 conflicts from 70 → 30-40
+
+[global]
+max_attempts = 100  # Increased for better statistical sampling
+enable_fluxnet_rl = true
+rl_learning_rate = 0.05
+rl_epsilon = 0.15
+rl_gamma = 0.95
+
+[phase0_dendritic]
+# FAKE - These parameters are ignored at runtime
+num_branches = 14
+branch_depth = 8
+learning_rate = 0.02
+plasticity = 0.85
+activation_threshold = 1.2
+reservoir_size = 512
+readout_size = 64
+
+[phase1_active_inference]
+# FAKE - These parameters are ignored at runtime
+prior_precision = 3.2
+likelihood_precision = 2.8
+learning_rate = 0.03
+free_energy_threshold = 0.5
+num_iterations = 100
+hidden_states = 64
+policy_depth = 3
+exploration_bonus = 0.2
+
+[phase2_thermodynamic]
+# REAL - Critical for initial compression
+iterations = 15000  # Increased for better convergence
+replicas = 8
+temperature_range = [0.008, 12.0]  # Wider range for better exploration
+cooling_rate = 0.93  # Slower cooling
+steps_per_temp = 100
+# Note: μ=0.6 hardcoded in kernel (should be 0.75 for better compression)
+
+[phase3_quantum]
+# REAL - Most critical for 17-color achievement
+evolution_time = 0.15  # Reduced from 0.22 (faster evolution)
+coupling_strength = 6.0  # Reduced from 8.0 (less aggressive penalty)
+max_colors = 19  # CRITICAL: Increased from 18 (breathing room)
+evolution_iterations = 1000  # Increased from 600 (better convergence)
+transverse_field = 1.5  # Increased from 1.0 (stronger tunneling)
+interference_decay = 0.001  # Reduced from 0.002 (preserve coherence)
+schedule_type = "exponential"  # Keep exponential (working well)
+stochastic_measurement = true  # Keep stochastic (breaks symmetry)
+use_complex_amplitudes = true
+num_qubits = 125
+
+[phase4_geodesic]
+# FAKE - Parameters ignored at runtime
+distance_threshold = 2.2
+centrality_weight = 0.7
+diameter_penalty = 1.5
+use_betweenness = true
+use_closeness = false
+use_eigenvector = true
+
+[phase5_geodesic_flow]
+# FAKE - Phase not implemented
+flow_iterations = 100
+flow_rate = 0.1
+ricci_weight = 0.5
+
+[phase6_tda]
+# FAKE - Parameters ignored at runtime
+persistence_threshold = 0.3
+max_dimension = 2
+coherence_cv_threshold = 0.15
+vietoris_rips_radius = 2.5
+num_landmarks = 100
+use_witness_complex = false
+
+[phase7_ensemble]
+# FAKE - Most parameters ignored at runtime
+num_replicas = 32
+exchange_interval = 50
+temperature_min = 0.001
+temperature_max = 10.0
+diversity_weight = 0.45
+consensus_threshold = 0.7
+voting_method = "weighted"
+replica_selection = "best"
+
+[dsatur]
+# FAKE - Not used in GPU pipeline
+saturation_power = 2.0
+random_tiebreak_prob = 0.1
+
+[memetic]
+# REAL - Post-processing optimization
+population_size = 100  # Increased from 80
+mutation_rate = 0.08  # Increased from 0.06 (more exploration)
+crossover_rate = 0.92  # Reduced from 0.94
+max_generations = 1000  # Increased from 500
+local_search_iterations = 200  # Increased from 100
+local_search_depth = 50000
+elitism_count = 15  # Increased from 10
+tournament_size = 10  # Increased from 8
+convergence_threshold = 100  # Increased from 80
+
+[metaphysical_coupling]
+# PARTIAL - Only geometry metrics are used
+enabled = true
+feedback_strength = 1.8  # Reduced from 2.0
+stress_threshold = 0.3
+diversity_bonus = 0.15
+coherence_weight = 0.4
+entanglement_threshold = 0.6
+geometric_frustration_weight = 0.3
+stress_decay_rate = 0.75
+coupling_schedule = "adaptive"
+
+# ⚠️ OPTIMIZATION NOTES:
+# 1. This config targets 30-40 conflicts in Phase 3 (down from 70)
+# 2. If still getting >40 conflicts, increase max_colors to 20
+# 3. For <20 final colors, increase μ to 0.75 in thermodynamic.cu
+# 4. Runtime: ~15s per attempt (50% increase from current)
+# 5. Recommended: Run 100-1000 attempts for statistical significance

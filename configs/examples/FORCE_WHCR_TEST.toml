@@ -1,0 +1,34 @@
+# WHCR Force Test Configuration
+# Forces Phase 2 to produce conflicts so WHCR will be invoked
+
+[phase2]
+# Deliberately bad parameters to generate conflicts
+num_replicas = 1  # Single replica = poor exploration
+swap_prob = 0.01  # Very low swap probability
+convergence_threshold = 1000.0  # Very high threshold (never converges)
+thermodynamic_iterations = 10  # Very few iterations
+temp_min = 10.0  # High minimum temperature
+temp_max = 20.0  # Narrow temperature range
+chemical_potential = 0.0  # No pressure to reduce colors
+
+[whcr]
+# WHCR configuration for testing
+max_iterations = 50
+precision = 1
+max_colors = 128
+enable_wavelet = true
+enable_geometry_coupling = true
+
+[phases]
+phase0_enabled = true
+phase1_enabled = true
+phase2_enabled = true
+phase3_enabled = false  # Disable Phase 3 to avoid fixing conflicts
+phase4_enabled = true
+phase5_enabled = false  # Disable color compression
+phase6_enabled = true
+phase7_enabled = true
+
+[general]
+verbose = true
+attempts = 1

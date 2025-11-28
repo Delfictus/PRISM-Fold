@@ -1,0 +1,41 @@
+# Run 3: Fast Phase 2 + Enhanced Memetic (512 attempts)
+#
+# Strategy: Reduce Phase 2 iterations for speed (6K vs 10K) while maintaining
+# enhanced memetic parameters to test if faster GPU population generation
+# improves memetic starting diversity
+#
+# Changes from Run 2:
+# - Phase 2: iterations 10000 → 6000 (40% reduction, ~14s vs ~24s per attempt)
+# - Phase 2: temp_max 10.0 → 12.0 (higher exploration)
+# - Phase 2: replicas 8 → 6 (fewer schedules for speed)
+# - Attempts: 256 → 512 (2x population)
+# - Memetic: mutation_rate=0.06, local_search=150 (unchanged from Run 2)
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+enabled = true
+population_size = 128
+generations = 500
+crossover_rate = 0.8
+mutation_rate = 0.06          # Enhanced from Run 2
+local_search_iterations = 150  # Enhanced from Run 2
+elitism_count = 10
+selection_strategy = "tournament"
+tournament_size = 5
+maintain_diversity = true
+convergence_threshold = 50
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# FAST PROFILE: 6K iterations for speed + diversity
+iterations = 6000              # 40% reduction from baseline
+replicas = 6                   # Fewer replicas for speed
+temp_min = 0.003               # Lower floor for better exploitation
+temp_max = 12.0                # Higher ceiling for more exploration

@@ -1,0 +1,54 @@
+# Run 5: Hybrid Configuration - Best of Run 2 + Run 4
+#
+# Strategy: Combine Run 2's successful Phase 2 temperature range with
+# Run 4's enhanced memetic parameters to attempt beating 39-color baseline.
+#
+# Hypothesis: Run 2's 38-color result may be reproducible with enhanced
+# memetic evolution providing deeper exploitation of the search space.
+#
+# Phase 2 Profile (from Run 2):
+# - iterations=10000: Full annealing depth
+# - replicas=8: Run 2's baseline (vs Run 4's 10)
+# - temp_min=0.01: Run 2's higher floor (vs Run 4's 0.0005)
+# - temp_max=10.0: Run 2's wider range (vs Run 4's 8.0)
+# - Rationale: Run 2 achieved 38 colors with this profile
+#
+# Memetic Enhanced Profile (from Run 4):
+# - mutation_rate=0.07: +17% vs Run 2's 0.06
+# - local_search=200: +33% vs Run 2's 150
+# - Rationale: Deeper search without changing GPU baseline diversity
+#
+# Expected Outcomes:
+# 1. GPU baselines: Likely still 41 colors (consistent pattern)
+# 2. Target: Match or beat Run 2's 38 colors via enhanced memetic
+# 3. Runtime: ~6.5 hours (256 attempts at ~92s each + memetic)
+# 4. Test: Does memetic enhancement compensate for temp range?
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[memetic]
+enabled = true
+population_size = 128
+generations = 500
+crossover_rate = 0.8
+mutation_rate = 0.07           # Enhanced from Run 2's 0.06
+local_search_iterations = 200  # Enhanced from Run 2's 150
+elitism_count = 10
+selection_strategy = "tournament"
+tournament_size = 5
+maintain_diversity = true
+convergence_threshold = 50
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[phase2]
+# RUN 2 PROFILE: Same as original 38-color success
+iterations = 10000       # Full baseline
+replicas = 8             # Run 2's count
+temp_min = 0.01          # Run 2's floor
+temp_max = 10.0          # Run 2's ceiling (wider than Run 4's 8.0)

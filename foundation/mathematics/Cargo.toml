@@ -1,0 +1,18 @@
+[package]
+name = "mathematics"
+version = "0.1.0"
+edition = "2021"
+authors = ["ARES-51 Research"]
+description = "Mathematical proof system for Active Inference Platform"
+license = "MIT"
+
+[dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+
+[dev-dependencies]
+# Testing dependencies
+
+[lib]
+name = "mathematics"
+path = "mod.rs"

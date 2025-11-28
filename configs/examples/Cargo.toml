@@ -1,0 +1,113 @@
+[workspace]
+resolver = "2"
+members = [
+    "prism-core",
+    "prism-gpu",
+    "prism-geometry",
+    "prism-fluxnet",
+    "prism-phases",
+    "prism-whcr",
+    "prism-pipeline",
+    "prism-cli",
+    # New specialized compute crates
+    "prism-ontology",
+    "prism-mec",
+    "prism-physics",
+    "prism-gnn",
+    "prism-lbs",
+    # Legacy foundation crates (kept for migration)
+    "foundation/shared-types",
+    "foundation/prct-core",
+    "foundation/quantum",
+    "foundation/neuromorphic",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = ["PRISM-AI Research Team"]
+license = "MIT"
+repository = "https://github.com/prism-ai/prism"
+
+[workspace.dependencies]
+# Core error handling and async
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+toml = "0.8"
+
+# GPU acceleration
+cudarc = { version = "0.9", features = ["std"] }
+
+# Math and scientific computing
+ndarray = "0.15"
+nalgebra = "0.32"
+rand = "0.8"
+rand_distr = "0.4"
+rand_chacha = "0.3"
+statrs = "0.16"
+num-complex = "0.4"
+rustfft = "6.2"
+ordered-float = "4.2"
+
+# Graph algorithms
+petgraph = "0.6"
+
+# Parallelism
+rayon = "1.7"
+
+# Telemetry and metrics
+prometheus = "0.13"
+axum = "0.7"
+hyper = "1.0"
+log = "0.4"
+env_logger = "0.10"
+
+# Database for telemetry
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+indicatif = "0.17"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+dashmap = "6.0"
+parking_lot = "0.12"
+lazy_static = "1.4"
+
+# Cryptography (for PTX signing)
+sha2 = "0.10"
+hex = "0.4"
+
+# Inter-crate dependencies
+prism-core = { path = "prism-core" }
+prism-gpu = { path = "prism-gpu" }
+prism-geometry = { path = "prism-geometry" }
+prism-fluxnet = { path = "prism-fluxnet" }
+prism-phases = { path = "prism-phases" }
+prism-whcr = { path = "prism-whcr" }
+prism-pipeline = { path = "prism-pipeline" }
+prism-ontology = { path = "prism-ontology" }
+prism-mec = { path = "prism-mec" }
+prism-physics = { path = "prism-physics" }
+prism-gnn = { path = "prism-gnn" }
+shared-types = { path = "foundation/shared-types" }
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+debug = true

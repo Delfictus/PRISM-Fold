@@ -1,0 +1,122 @@
+name: GPU Acceleration CI
+
+on:
+  push:
+    branches: [ main, prism-v2-refactor ]
+    paths:
+      - 'prism-gpu/src/**'
+      - 'prism-phases/src/phase3_quantum.rs'
+      - 'prism-pipeline/src/orchestrator/**'
+      - 'prism-cli/src/main.rs'
+      - '.github/workflows/gpu.yml'
+  pull_request:
+    branches: [ main, prism-v2-refactor ]
+    paths:
+      - 'prism-gpu/src/**'
+      - 'prism-phases/src/phase3_quantum.rs'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  gpu-unit-tests:
+    name: GPU Unit Tests (Simulation Mode)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-gpu-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run GPU context tests (no GPU required)
+        run: |
+          cargo test --package prism-gpu --lib context --no-default-features -- --nocapture
+
+      - name: Run Phase 3 CPU fallback tests
+        run: |
+          cargo test --package prism-phases --lib phase3 --no-default-features -- --nocapture
+
+      - name: Check GPU feature compiles
+        run: |
+          cargo check --package prism-gpu --features cuda --no-default-features
+          cargo check --package prism-pipeline --features gpu --no-default-features
+
+  gpu-clippy:
+    name: GPU Code Quality (Clippy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy on GPU code
+        run: |
+          cargo clippy --package prism-gpu --no-default-features -- -D warnings
+          cargo clippy --package prism-phases --no-default-features -- -D warnings
+
+  gpu-docs-check:
+    name: GPU Documentation Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check GPU documentation exists
+        run: |
+          test -f GPU_FINAL_STATUS.md || (echo "Missing GPU_FINAL_STATUS.md" && exit 1)
+          test -f GPU_MILESTONE_COMPLETE.md || (echo "Missing GPU_MILESTONE_COMPLETE.md" && exit 1)
+          test -f IMPLEMENTATION_SUMMARY.md || (echo "Missing IMPLEMENTATION_SUMMARY.md" && exit 1)
+          test -f GPU_QUICK_REFERENCE.md || (echo "Missing GPU_QUICK_REFERENCE.md" && exit 1)
+          test -f scripts/compile_ptx.sh || (echo "Missing compile_ptx.sh" && exit 1)
+          echo "✓ All GPU documentation files present"
+
+      - name: Validate PTX compilation script
+        run: |
+          chmod +x scripts/compile_ptx.sh
+          grep -q "nvcc" scripts/compile_ptx.sh || (echo "Missing nvcc in compile_ptx.sh" && exit 1)
+          echo "✓ PTX compilation script valid"
+
+  gpu-summary:
+    name: GPU CI Summary
+    runs-on: ubuntu-latest
+    needs: [gpu-unit-tests, gpu-clippy, gpu-docs-check]
+    if: always()
+
+    steps:
+      - name: Check job results
+        run: |
+          echo "=== GPU CI Summary ==="
+          echo "Unit Tests: ${{ needs.gpu-unit-tests.result }}"
+          echo "Code Quality: ${{ needs.gpu-clippy.result }}"
+          echo "Documentation: ${{ needs.gpu-docs-check.result }}"
+
+          if [[ "${{ needs.gpu-unit-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.gpu-clippy.result }}" != "success" ]] || \
+             [[ "${{ needs.gpu-docs-check.result }}" != "success" ]]; then
+            echo "✗ GPU CI failed"
+            exit 1
+          else
+            echo "✓ GPU CI passed"
+            exit 0
+          fi

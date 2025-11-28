@@ -1,0 +1,104 @@
+# DSJC500.5 Configuration - Optimized for 500-vertex graph
+# Target: < 50 colors (best known is ~48)
+
+[graph]
+enable_preprocessing = true
+max_vertices = 500
+
+[phases]
+phase0_enabled = true  # Dendritic reservoir
+phase1_enabled = true  # Active inference
+phase2_enabled = true  # Thermodynamic
+phase3_enabled = true  # Quantum
+phase4_enabled = true  # Geodesic
+phase5_enabled = true  # Membrane
+phase6_enabled = true  # TDA
+phase7_enabled = true  # Ensemble
+
+[phase0]
+# Dendritic reservoir - scaled for 500 vertices
+num_branches = 8
+branch_length = 100
+leak_rate = 0.3
+spectral_radius = 0.95
+input_scaling = 0.5
+connectivity = 0.1
+
+[phase1]
+# Active inference - more iterations for larger graph
+max_iterations = 500
+learning_rate = 0.01
+precision_threshold = 1e-4
+batch_size = 50
+momentum = 0.9
+
+[phase2]
+# Thermodynamic - careful compression for 500 vertices
+initial_temperature = 2.0
+annealing_factor = 0.95
+target_color_reduction = 2  # Conservative reduction
+max_rounds = 10
+max_iterations_per_round = 300
+allow_temporary_conflicts = false
+conflict_penalty_weight = 10.0
+compaction_factor = 0.95
+
+[phase3]
+# Quantum - targeting 48-50 colors
+target_colors = 48
+precision = "high"
+iterations = 500
+coupling_strength = 8.0
+enable_superposition = true
+quantum_annealing_schedule = "polynomial"
+chemical_potential = 0.6  # Less aggressive than DSJC125
+
+[phase4]
+# Geodesic - scaled distance computation
+algorithm = "floyd_warshall_gpu"
+max_distance = 10
+weight_function = "inverse"
+normalize = true
+
+[phase5]
+# Membrane - larger scale orchestration
+num_compartments = 10
+diffusion_rate = 0.1
+reaction_rate = 0.05
+time_steps = 200
+
+[phase6]
+# TDA - topological analysis for larger graph
+max_dimension = 2
+persistence_threshold = 0.01
+filtration_type = "vietoris_rips"
+max_edge_length = 5
+
+[phase7]
+# Ensemble - final optimization
+population_size = 200
+generations = 1000
+mutation_rate = 0.02
+crossover_rate = 0.8
+elite_size = 20
+diversity_threshold = 0.1
+enable_memetic = true
+memetic_frequency = 50
+memetic_intensity = 10
+geometry_coupling = true
+
+[whcr]
+enabled = false  # Disabled due to oscillation bug
+max_iterations_per_level = 100
+precision_mode = "high"
+color_addition_budget = 5
+
+[memetic]
+enabled = true
+local_search_probability = 0.3
+local_search_iterations = 50
+tabu_tenure = 20
+
+[output]
+solution_path = "results/dsjc500_solution.json"
+telemetry_path = "results/dsjc500_telemetry.jsonl"

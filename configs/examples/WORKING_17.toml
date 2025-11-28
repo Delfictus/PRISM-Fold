@@ -1,0 +1,70 @@
+# WORKING CONFIG - WON'T FREEZE, STILL AGGRESSIVE
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = false  # Disabled for speed
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.15
+dsatur_ratio = 0.70
+random_ratio = 0.15
+
+[phase0_dendritic]
+enabled = false  # OFF for speed
+
+[phase1_active_inference]
+enabled = false  # OFF for speed
+
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.5
+final_temperature = 0.01
+cooling_rate = 0.95
+steps_per_temp = 50  # Quick
+
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.1
+coupling_strength = 10.0
+max_colors = 17  # KEY: Must be 17!
+num_qubits = 125  # REQUIRED FIELD!
+evolution_iterations = 100  # Quick
+
+[phase3_pimc]
+enabled = false  # OFF for speed
+
+[phase4_geodesic]
+enabled = false  # OFF for speed
+
+[phase5_geodesic_flow]
+enabled = false  # OFF for speed
+
+[phase6_tda]
+enabled = false  # OFF for speed
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 8
+
+[metaphysical_coupling]
+enabled = false  # OFF for speed
+
+# MEMETIC - SMALL AND FAST
+[memetic]
+enabled = true
+population_size = 30   # SMALL
+mutation_rate = 0.10
+crossover_rate = 0.85
+elite_fraction = 0.30
+max_generations = 100  # QUICK
+local_search_intensity = 0.70
+tournament_size = 3
+convergence_threshold = 30
+
+[telemetry]
+enabled = false
+
+[logging]
+level = "info"

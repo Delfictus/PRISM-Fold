@@ -1,0 +1,252 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EXTREME MAXIMUM AGGRESSION - NO LIMITS, NO COMPROMISES
+# ═══════════════════════════════════════════════════════════════════════════
+# Chemical Potential μ=0.9 MAXIMUM PRESSURE
+# ALL FEATURES AT MAXIMUM SETTINGS
+# NO TIME LIMITS - PURE PERFORMANCE
+# TARGET: 17 COLORS AT ANY COST
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 1
+enable_fluxnet_rl = true         # FULL FLUXNET RL
+rl_learning_rate = 0.05          # MAXIMUM LEARNING
+rl_discount_factor = 0.995       # EXTREME LONG-TERM
+rl_discretization_mode = "extended"  # 65536 state space
+rl_exploration_epsilon = 0.10    # Focused exploitation
+rl_replay_buffer_size = 50000    # HUGE experience replay
+rl_batch_size = 256              # Large batches
+rl_update_frequency = 10         # Frequent updates
+rl_target_update_interval = 100  # Stable targets
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WARMSTART: MAXIMUM QUALITY
+# ═══════════════════════════════════════════════════════════════════════════
+[warmstart]
+enabled = true
+greedy_ratio = 0.05
+dsatur_ratio = 0.85              # MAXIMUM DSatur
+random_ratio = 0.10
+anchor_fraction = 0.50           # Lock HALF the best vertices
+quality_threshold = 0.95         # EXTREME quality requirement
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 0: DENDRITIC RESERVOIR - MAXIMUM NEUROMORPHIC
+# ═══════════════════════════════════════════════════════════════════════════
+[phase0_dendritic]
+enabled = true
+num_branches = 16                # MAXIMUM branches
+branch_depth = 10                # MAXIMUM depth
+learning_rate = 0.025            # FAST learning
+activation_threshold = 0.30      # Very sensitive
+plasticity = 0.98                # MAXIMUM plasticity
+spike_frequency = 200.0          # EXTREME frequency
+refractory_period = 1.0          # Minimal refractory
+temporal_window = 50.0           # Large integration window
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 1: ACTIVE INFERENCE - MAXIMUM BAYESIAN
+# ═══════════════════════════════════════════════════════════════════════════
+[phase1_active_inference]
+enabled = true
+prior_precision = 5.0            # EXTREME priors
+likelihood_precision = 6.0       # MAXIMUM confidence
+learning_rate = 0.20             # VERY FAST updates
+free_energy_threshold = 0.02     # ULTRA TIGHT convergence
+num_iterations = 500             # MAXIMUM iterations
+belief_propagation_rounds = 20   # MANY message passes
+uncertainty_weight = 0.1         # Focus on exploitation
+variational_iterations = 50      # Deep variational inference
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 2: THERMODYNAMIC - EXTREME ANNEALING μ=0.9
+# ═══════════════════════════════════════════════════════════════════════════
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.5        # Lower for μ=0.9
+final_temperature = 0.0001       # NEAR ZERO
+cooling_rate = 0.88              # SLOW cooling for quality
+steps_per_temp = 200             # MANY steps per temp
+compaction_enabled = true
+compaction_threshold = 0.02      # EXTREME compaction
+replica_exchange_interval = 10   # FREQUENT exchanges
+num_replicas = 32                # MANY replicas
+adaptive_cooling = true          # Smart temperature schedule
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3: QUANTUM EVOLUTION - MAXIMUM QUANTUM
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.08            # Tuned for μ=0.9
+coupling_strength = 12.0         # EXTREME anti-ferromagnetic
+max_colors = 17                  # EXACT TARGET - Forces 17 colors!
+num_qubits = 125
+use_complex_amplitudes = true    # FULL quantum features
+evolution_iterations = 1000      # MAXIMUM iterations
+transverse_field = 0.8           # Tuned for μ=0.9
+interference_decay = 0.001       # VERY slow decoherence
+schedule_type = "exponential"
+stochastic_measurement = true
+entanglement_threshold = 0.9     # MAXIMUM entanglement
+coherence_time = 1000.0          # EXTREME coherence
+adiabatic_parameter = 0.99       # Nearly adiabatic
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3B: PIMC - MAXIMUM PATH INTEGRAL
+# ═══════════════════════════════════════════════════════════════════════════
+[phase3_pimc]
+enabled = true
+num_replicas = 128               # MAXIMUM replicas
+dimensions = 125
+beta = 5.0                       # EXTREME quantum effects
+delta_tau = 0.02                 # VERY fine time slicing
+transverse_field = 0.8
+coupling_strength = 4.0          # VERY strong coupling
+mc_steps = 1000                  # MAXIMUM MC steps
+use_sparse = false
+gpu_enabled = true
+path_integral_order = 6          # High-order Trotter
+thermalization_steps = 500       # Long thermalization
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 4: GEODESIC - MAXIMUM MANIFOLD
+# ═══════════════════════════════════════════════════════════════════════════
+[phase4_geodesic]
+enabled = true
+distance_threshold = 2           # TIGHT neighborhoods
+centrality_weight = 3.0          # EXTREME centrality
+spectral_gap = 0.05              # Fine spectral resolution
+laplacian_eigenvectors = 20     # MANY eigenvectors
+ricci_flow_iterations = 100     # Deep geometric flow
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 5: GEODESIC FLOW - MAXIMUM FLOW
+# ═══════════════════════════════════════════════════════════════════════════
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 500            # MAXIMUM flow
+flow_strength = 0.6              # Strong flow
+diffusion_rate = 0.15            # Controlled diffusion
+momentum = 0.95                  # HIGH momentum
+adaptive_step_size = true
+nesterov_acceleration = true     # Accelerated gradient
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 6: TDA - MAXIMUM TOPOLOGY
+# ═══════════════════════════════════════════════════════════════════════════
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.25     # Fine features
+max_dimension = 4                # Compute up to H4
+coherence_cv_threshold = 0.10    # TIGHT coherence
+vietoris_rips_radius = 1.2       # Precise filtration
+persistence_diagram_points = 200 # HIGH resolution
+wasserstein_distance = true
+bottleneck_distance = true       # Both metrics
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 7: ENSEMBLE - MAXIMUM PARALLEL
+# ═══════════════════════════════════════════════════════════════════════════
+[phase7_ensemble]
+enabled = true
+num_replicas = 64                # MAXIMUM replicas
+exchange_interval = 5            # VERY frequent exchanges
+temperature_range = [0.001, 1.2] # EXTREME range for μ=0.9
+diversity_weight = 0.1           # Focus on quality
+consensus_threshold = 0.95       # EXTREME quality
+replica_selection = "boltzmann"
+adaptive_temperatures = true     # Dynamic ladder
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# METAPHYSICAL COUPLING - MAXIMUM GEOMETRY
+# ═══════════════════════════════════════════════════════════════════════════
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 5.0     # MAXIMUM stress
+feedback_strength = 2.5          # EXTREME coupling
+hotspot_threshold = 1            # IMMEDIATE detection
+stress_decay_rate = 0.50         # SLOW decay
+overlap_penalty = 5.0            # MAXIMUM penalty
+curvature_flow = true
+manifold_dimension = 4           # 4D embedding
+hyperbolic_embedding = true      # Non-Euclidean geometry
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMETIC EVOLUTION - UNLIMITED POWER
+# ═══════════════════════════════════════════════════════════════════════════
+[memetic]
+enabled = true
+population_size = 100            # REDUCED FOR TESTING
+mutation_rate = 0.08             # Balanced mutation
+crossover_rate = 0.95            # High crossover
+elite_fraction = 0.40            # Keep 40% elite
+max_generations = 500            # REASONABLE LIMIT
+local_search_intensity = 0.99    # MAXIMUM LOCAL SEARCH
+tournament_size = 10             # HIGH selection pressure
+convergence_threshold = 500      # Only stop after 500 gens no improvement
+adaptive_mutation = true         # Smart mutation
+island_model = true              # Parallel islands
+num_islands = 8                  # Multiple populations
+migration_interval = 50          # Island exchanges
+lamarckian_probability = 0.8     # High Lamarckian evolution
+baldwin_effect = true            # Learning-guided evolution
+niching_radius = 2.0             # Species formation
+fitness_sharing = true           # Diversity preservation
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEC - MOLECULAR DYNAMICS
+# ═══════════════════════════════════════════════════════════════════════════
+[mec]
+enabled = true
+num_molecules = 125
+temperature = 250.0              # Lower temp for stability
+timestep = 0.0005                # FINE integration
+num_steps = 5000                 # MANY MD steps
+force_field = "lennard_jones"
+cutoff_radius = 3.0              # Larger cutoff
+neighbor_list_update = 10        # Efficient updates
+gpu_enabled = true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ADVANCED FEATURES
+# ═══════════════════════════════════════════════════════════════════════════
+[advanced]
+use_curriculum_learning = true   # Progressive difficulty
+curriculum_stages = 10           # Many curriculum levels
+use_transfer_learning = true     # Learn from past solutions
+transfer_memory_size = 1000      # Large solution memory
+use_meta_learning = true         # Learn to learn
+meta_learning_rate = 0.001       # Meta-optimizer
+use_ensemble_distillation = true # Knowledge distillation
+distillation_temperature = 3.0   # Soft targets
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TELEMETRY - FULL MONITORING
+# ═══════════════════════════════════════════════════════════════════════════
+[telemetry]
+enabled = true
+capture_all_phases = true
+capture_rl_state = true
+capture_gpu_metrics = true
+capture_quantum_state = true
+capture_topology = true
+capture_geometry = true
+capture_evolution = true
+ndjson_format = true
+
+[logging]
+level = "info"
+log_gpu_kernel_times = true
+log_phase_transitions = true
+log_rl_rewards = true
+log_quantum_evolution = true
+log_memetic_evolution = true
+log_convergence_metrics = true

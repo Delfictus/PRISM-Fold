@@ -1,0 +1,112 @@
+# FluxNet v2 Training Configuration
+# 
+# This configuration specifies hyperparameters for training
+# the Universal FluxNet RL controller on collected telemetry data.
+
+[training]
+# Number of training epochs over the dataset
+epochs = 100
+
+# Learning rate (alpha in Q-learning)
+alpha = 0.1
+
+# Discount factor (gamma in Q-learning)
+gamma = 0.95
+
+# Exploration rate (epsilon-greedy)
+epsilon_start = 0.3
+epsilon_end = 0.01
+epsilon_decay = 0.995
+
+# Experience replay buffer size
+replay_buffer_size = 10000
+
+# Batch size for updates
+batch_size = 32
+
+[state_space]
+# Discretization mode: "compact" (4096 states) or "extended" (65536 states)
+mode = "extended"
+
+# Metrics to include in state representation (all enabled by default)
+enabled_metrics = [
+    "reservoir_entropy",
+    "reservoir_sparsity",
+    "active_inference_efe",
+    "thermodynamic_temp",
+    "quantum_purity",
+    "geodesic_centrality",
+    "tda_persistence",
+    "ensemble_diversity",
+    # FluxNet v2 new metrics
+    "phase2_temperature_stage",
+    "coherence_cv",
+    "warmstart_quality",
+    "attempt_progress",
+    "memetic_generation",
+    "memetic_improvement_rate"
+]
+
+[action_space]
+# Total action space size (80 actions in FluxNet v2)
+num_actions = 80
+
+# Per-phase action allocation
+[action_space.allocation]
+Phase0 = [0, 7]      # Dendritic Reservoir
+Phase1 = [8, 15]     # Active Inference
+Phase2 = [16, 23]    # Thermodynamic
+Phase3 = [24, 31]    # Quantum
+Phase4 = [32, 39]    # Geodesic
+Phase6 = [40, 47]    # TDA
+Phase7 = [48, 55]    # Ensemble
+Warmstart = [56, 63] # Warmstart config
+Memetic = [64, 71]   # Memetic tuning
+NoOp = 79
+
+[reward]
+# Reward function parameters
+chromatic_improvement_weight = 1.0
+conflict_penalty_weight = -0.5
+runtime_penalty_weight = -0.01
+
+# Reward shaping
+use_potential_based_shaping = true
+potential_discount = 0.9
+
+[curriculum]
+# Curriculum learning configuration
+enabled = true
+
+# Graph profiles for curriculum
+profiles = [
+    { name = "dsjc125_easy", density = 0.1, vertices = 125, difficulty = 1 },
+    { name = "dsjc125_medium", density = 0.5, vertices = 125, difficulty = 2 },
+    { name = "dsjc125_hard", density = 0.9, vertices = 125, difficulty = 3 },
+    { name = "dsjc250_easy", density = 0.1, vertices = 250, difficulty = 4 },
+    { name = "dsjc250_medium", density = 0.5, vertices = 250, difficulty = 5 }
+]
+
+# Training schedule (epochs per difficulty level)
+schedule = [20, 20, 20, 20, 20]
+
+[output]
+# Q-table output path
+qtable_path = "target/fluxnet/qtable_dsjc250_v2.bin"
+
+# Checkpoint frequency (epochs)
+checkpoint_interval = 10
+
+# Logging
+log_level = "info"
+log_metrics_every = 100  # Log every N updates
+
+[validation]
+# Validation split (fraction of data held out)
+validation_split = 0.2
+
+# Early stopping patience (epochs without improvement)
+early_stopping_patience = 15
+
+# Validation metric to monitor
+validation_metric = "average_reward"

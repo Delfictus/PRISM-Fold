@@ -1,0 +1,129 @@
+# DSJC500.5 Optimized Configuration - Based on hyperparameter analysis
+# Target: < 50 colors (best known is ~48)
+# Optimizations based on test results
+
+[graph]
+enable_preprocessing = true
+max_vertices = 500
+
+[phases]
+phase0_enabled = true  # Dendritic reservoir
+phase1_enabled = true  # Active inference
+phase2_enabled = true  # Thermodynamic - KEY PHASE
+phase3_enabled = true  # Quantum
+phase4_enabled = true  # Geodesic
+phase5_enabled = true  # Membrane
+phase6_enabled = true  # TDA
+phase7_enabled = true  # Ensemble
+
+[phase0]
+# Dendritic reservoir - increased connectivity for dense graph
+num_branches = 12
+branch_length = 150
+leak_rate = 0.25
+spectral_radius = 0.98
+input_scaling = 0.6
+connectivity = 0.15
+
+[phase1]
+# Active inference - faster convergence
+max_iterations = 200
+learning_rate = 0.02
+precision_threshold = 5e-4
+batch_size = 100
+momentum = 0.95
+
+[phase2]
+# Thermodynamic - OPTIMIZED based on analysis
+initial_temperature = 3.0  # Higher for better exploration
+annealing_factor = 0.92    # Faster cooling
+target_color_reduction = 3  # More aggressive
+max_rounds = 15
+max_iterations_per_round = 3000  # Reduced from 10000 - most gains in first 3k
+allow_temporary_conflicts = true  # Enable for better exploration
+conflict_penalty_weight = 50.0    # Increased from 10.0 to reduce conflicts
+compaction_factor = 0.90          # More aggressive compaction
+sweep_enabled = true
+sweep_range = [0.01, 5.0]
+replica_count = 12                # More replicas for diversity
+
+[phase3]
+# Quantum - aggressive targeting
+target_colors = 45                # More aggressive than 48
+precision = "ultra"
+iterations = 1000
+coupling_strength = 12.0           # Increased coupling
+enable_superposition = true
+quantum_annealing_schedule = "exponential"
+chemical_potential = 0.75          # More aggressive
+tunneling_field = 0.3
+entanglement_radius = 3
+
+[phase4]
+# Geodesic - optimized for 500 vertices
+algorithm = "floyd_warshall_gpu"
+max_distance = 15                  # Increased for larger graph
+weight_function = "inverse_squared"
+normalize = true
+cutoff_percentile = 95
+
+[phase5]
+# Membrane - scaled orchestration
+num_compartments = 20              # More compartments
+diffusion_rate = 0.15
+reaction_rate = 0.08
+time_steps = 300
+coupling_strength = 0.4
+
+[phase6]
+# TDA - enhanced topological analysis
+max_dimension = 3                  # Higher dimension
+persistence_threshold = 0.005      # More sensitive
+filtration_type = "vietoris_rips"
+max_edge_length = 8
+num_landmarks = 150
+
+[phase7]
+# Ensemble - aggressive final optimization
+population_size = 300              # Larger population
+generations = 2000                 # More generations
+mutation_rate = 0.03
+crossover_rate = 0.85
+elite_size = 30
+diversity_threshold = 0.15
+enable_memetic = true
+memetic_frequency = 25             # More frequent
+memetic_intensity = 20             # More intense
+geometry_coupling = true
+adaptive_mutation = true
+tournament_size = 5
+
+[whcr]
+enabled = false  # DISABLED - oscillation bug confirmed
+
+[memetic]
+enabled = true
+local_search_probability = 0.5    # Increased probability
+local_search_iterations = 100     # More iterations
+tabu_tenure = 30
+kempe_chain_attempts = 50
+adaptive_tenure = true
+
+[conflict_repair]
+# New section for conflict-focused repair (non-WHCR)
+enabled = true
+max_repair_iterations = 500
+conflict_threshold = 100
+repair_strategy = "adaptive"
+use_tabu = true
+tabu_size = 50
+
+[output]
+solution_path = "results/dsjc500_optimized_solution.json"
+telemetry_path = "results/dsjc500_optimized_telemetry.jsonl"
+
+[monitoring]
+checkpoint_frequency = 100
+verbose = true
+track_best = true
+early_stopping_patience = 200

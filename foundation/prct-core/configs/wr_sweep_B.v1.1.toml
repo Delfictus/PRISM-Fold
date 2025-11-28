@@ -1,0 +1,102 @@
+# WR Sweep B (geodesic-heavy)
+# Emphasizes geodesic distance features in tie-breaking
+# VRAM-safe for 8GB devices (replicas=48, beads=48)
+
+profile = "wr_sweep_B"
+version = "1.1.0"
+target_chromatic = 83
+deterministic = false
+max_runtime_hours = 24.0
+
+[cpu]
+threads = 24
+pin_pool = false
+work_steal = true
+parallel_io = true
+
+[gpu]
+device_id = 0
+streams = 1
+batch_size = 1024
+enable_reservoir_gpu = true
+enable_te_gpu = true
+enable_statmech_gpu = true
+enable_quantum_gpu = true
+enable_pimc_gpu = true
+enable_thermo_gpu = true
+enable_tda_gpu = true
+
+[orchestrator]
+use_reservoir_prediction = true
+use_active_inference = true
+use_transfer_entropy = true
+use_geodesic_features = true
+use_thermodynamic_equilibration = true
+use_pimc = true
+use_quantum_classical_hybrid = true
+use_gnn_screening = true
+use_adp_learning = true
+use_tda = true
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+restarts = 8
+early_stop_no_improve_iters = 5
+checkpoint_minutes = 15
+adp_dsatur_depth = 50000
+adp_quantum_iterations = 20
+adp_thermo_num_temps = 56
+
+[neuromorphic]
+enabled = true
+reservoir_size = 1000
+spectral_radius = 0.9
+leak_rate = 0.3
+input_scaling = 0.5
+
+[dsatur]
+geodesic_weight = 0.45
+reservoir_weight = 0.25
+ai_weight = 0.30
+tie_break = "geodesic_then_ai"
+
+[quantum]
+iterations = 3
+target_chromatic = 83
+depth = 3
+attempts = 384
+beta = 0.9
+temperature = 1.0
+
+[memetic]
+population_size = 320
+elite_size = 8
+generations = 800
+mutation_rate = 0.05
+tournament_size = 3
+local_search_depth = 5000
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+[thermo]
+replicas = 48
+num_temps = 56
+exchange_interval = 20
+t_min = 0.01
+t_max = 10.0
+batch_size = 1000
+damping = 0.02
+schedule = "geometric"
+
+[pimc]
+replicas = 48
+beads = 48
+beta = 1.0
+tau = 0.1
+steps = 18000
+
+[adp]
+epsilon = 0.3
+epsilon_decay = 0.995
+epsilon_min = 0.05
+alpha = 0.1
+gamma = 0.95

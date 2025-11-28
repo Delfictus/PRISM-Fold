@@ -1,0 +1,37 @@
+# CMA-ES GPU Optimization Configuration for DSJC250.5
+#
+# Strategy: Use CMA-ES GPU optimizer to fine-tune graph coloring solutions
+# via evolutionary parameter optimization with covariance matrix adaptation.
+#
+# This configuration enables the CMA-ES phase which uses GPU-accelerated
+# optimization to search the parameter space for improved coloring solutions.
+#
+# Expected Outcomes:
+# 1. GPU-accelerated CMA-ES convergence
+# 2. Real-time telemetry with sigma, convergence metrics, TE correlation
+# 3. PhaseContext CMA state tracking
+# 4. Proof of GPU kernel execution via telemetry logs
+
+[pipeline]
+max_vertices = 10000
+retry_limit = 3
+
+[gpu]
+devices = [0]
+scheduling_policy = "round-robin"
+ptx_directory = "target/ptx"
+
+[cma_es]
+enabled = true
+use_gpu = true                  # Enable GPU acceleration for CMA-ES
+population_size = 20            # Population for CMA-ES
+initial_sigma = 0.5             # Initial step size
+max_iterations = 50             # Maximum CMA generations
+# target_fitness = 1000.0       # Optional fitness target
+
+[phase2]
+# Minimal Phase 2 for baseline - CMA-ES will optimize from here
+iterations = 1000
+replicas = 4
+temp_min = 0.01
+temp_max = 5.0

@@ -1,0 +1,165 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 3 REPAIR ENHANCED CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+# HARD-LOCKED 17-COLOR REPAIR STRATEGY
+#
+# PROBLEM: Phase 3 consistently produces 17 colors, 58 conflicts
+#          Memetic repair gives up and expands to 22 colors
+#
+# SOLUTION: Lock Phase 3 at 17 colors, massively enhance memetic search
+#           to find the conflict-free 17-color solution
+#
+# KEY FEATURES:
+# 1. HARD CHROMATIC LIMIT: Phase 3 locked at 17 colors (NO expansion)
+# 2. MASSIVE MEMETIC SEARCH: 2.5x population, 3.3x generations, 2.3x mutation
+# 3. ENHANCED PHASE 2: Better warmstart production (2x equilibration)
+# 4. STRICT DSATUR: Deep backtracking to enforce 17-color constraint
+#
+# SUCCESS METRIC: 17 colors, 0 conflicts (WORLD RECORD)
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 5
+enable_fluxnet_rl = true
+rl_learning_rate = 0.03
+rl_discount_factor = 0.98
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.10
+dsatur_ratio = 0.75
+random_ratio = 0.15
+anchor_fraction = 0.35
+
+[phase0_dendritic]
+enabled = true
+num_branches = 10
+branch_depth = 6
+learning_rate = 0.015
+activation_threshold = 0.35
+plasticity = 0.90
+gpu_enabled = true
+
+[phase1_active_inference]
+enabled = true
+prior_precision = 2.5
+likelihood_precision = 3.5
+learning_rate = 0.12
+free_energy_threshold = 0.06
+num_iterations = 150
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 2: ENHANCED THERMODYNAMIC (Better Warmstart Production)
+# ───────────────────────────────────────────────────────────────────────────
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.0
+final_temperature = 0.001
+cooling_rate = 0.96
+steps_per_temp = 24000          # DOUBLED from 12,000 (2x equilibration)
+compaction_enabled = true
+compaction_threshold = 0.08
+num_temps = 64                  # INCREASED from 48 (finer schedule)
+num_replicas = 64               # INCREASED from 48 (more parallel paths)
+t_min = 0.001                   # REDUCED from 0.002 (colder final)
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 3: HARD-LOCKED QUANTUM (No Expansion Allowed)
+# ───────────────────────────────────────────────────────────────────────────
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.15
+coupling_strength = 8.0
+max_colors = 17
+num_qubits = 125
+use_complex_amplitudes = true
+evolution_iterations = 30          # INCREASED from 20 (more refinement)
+transverse_field = 1.5
+interference_decay = 0.01
+schedule_type = "exponential"
+stochastic_measurement = true
+target_chromatic = 17              # LOCKED TARGET
+max_colors_hard_limit = 17         # NO EXPANSION ALLOWED
+
+[phase3_pimc]
+enabled = true
+num_replicas = 32
+dimensions = 125
+beta = 3.0
+delta_tau = 0.06
+transverse_field = 1.5
+coupling_strength = 2.0
+mc_steps = 150
+use_sparse = false
+gpu_enabled = true
+
+[phase4_geodesic]
+enabled = true
+distance_threshold = 3
+centrality_weight = 1.5
+gpu_enabled = true
+
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 120
+flow_strength = 0.4
+diffusion_rate = 0.25
+
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.40
+max_dimension = 2
+coherence_cv_threshold = 0.20
+vietoris_rips_radius = 2.0
+gpu_enabled = true
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 16
+exchange_interval = 10
+temperature_range = [0.001, 1.0]
+diversity_weight = 0.3
+consensus_threshold = 0.85
+gpu_enabled = true
+
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 2.0
+feedback_strength = 1.2
+hotspot_threshold = 3
+stress_decay_rate = 0.80
+overlap_penalty = 2.0
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 4/5: MASSIVELY ENHANCED MEMETIC REPAIR
+# ───────────────────────────────────────────────────────────────────────────
+[memetic]
+enabled = true
+population_size = 150              # INCREASED from 60 (2.5x diversity)
+mutation_rate = 0.35               # INCREASED from 0.15 (2.3x exploration)
+crossover_rate = 0.90
+elite_fraction = 0.20              # INCREASED from 0.15 (preserve top 20%)
+max_generations = 1000             # INCREASED from 300 (3.3x depth)
+local_search_intensity = 0.95      # MAXIMUM from 0.80 (2x refinement)
+tournament_size = 5
+convergence_threshold = 50
+local_search_depth = 50000         # INCREASED from 24,000 (2x DSATUR ops)
+
+# ───────────────────────────────────────────────────────────────────────────
+# DSATUR: STRICT 17-COLOR ENFORCEMENT
+# ───────────────────────────────────────────────────────────────────────────
+[dsatur]
+max_colors = 17                    # HARD LOCK (NO ESCAPE)
+backtrack_depth = 100              # INCREASED from 50 (2x deeper search)
+early_termination = false          # DISABLED (must complete)
+conflict_penalty = 1000.0          # MAXIMUM PENALTY
+use_degree_ordering = true
+use_saturation_heuristic = true
+
+[telemetry]
+enabled = true
+capture_all_phases = true
+
+[logging]
+level = "info"

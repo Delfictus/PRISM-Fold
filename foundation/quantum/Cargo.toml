@@ -1,0 +1,25 @@
+[package]
+name = "quantum-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nalgebra = "0.33"
+ndarray = "0.15"
+ndarray-linalg = { version = "0.16", features = ["intel-mkl-static"] }
+num-complex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+approx = "0.5"
+rand = "0.8"
+
+# CPU optimization + GPU acceleration dependencies
+rayon = "1.10"
+cudarc = { version = "0.9", features = ["std"] }
+candle-core = { version = "0.8" }
+
+[lib]
+name = "quantum_engine"
+path = "src/lib.rs"

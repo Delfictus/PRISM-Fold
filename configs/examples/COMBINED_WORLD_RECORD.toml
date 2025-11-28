@@ -1,0 +1,165 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# COMBINED WORLD RECORD CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+# FUSION OF BOTH HYPERTUNER STRATEGIES:
+# 1. Quantum conflict reduction (Agent 1: OPTIMIZED_CONFLICT_REDUCTION)
+# 2. Hard-locked memetic repair (Agent 2: PHASE3_REPAIR_ENHANCED)
+#
+# STRATEGY: Attack the problem from BOTH directions simultaneously
+# - Quantum: Reduce 58→0 conflicts through extended evolution + strong chemical potential
+# - Repair: Lock at 17 colors and force search to find conflict-free solution
+#
+# EXPECTED OUTCOME: 17 colors, 0 conflicts (WORLD RECORD)
+# ═══════════════════════════════════════════════════════════════════════════
+
+[global]
+max_attempts = 10              # MAXIMUM attempts for world record attempt
+enable_fluxnet_rl = true
+rl_learning_rate = 0.03
+rl_discount_factor = 0.98
+rl_discretization_mode = "extended"
+
+[warmstart]
+enabled = true
+greedy_ratio = 0.10
+dsatur_ratio = 0.75
+random_ratio = 0.15
+anchor_fraction = 0.35
+
+[phase0_dendritic]
+enabled = true
+num_branches = 10
+branch_depth = 6
+learning_rate = 0.015
+activation_threshold = 0.35
+plasticity = 0.90
+gpu_enabled = true
+
+[phase1_active_inference]
+enabled = true
+prior_precision = 2.5
+likelihood_precision = 3.5
+learning_rate = 0.12
+free_energy_threshold = 0.06
+num_iterations = 150
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 2: SUPER-ENHANCED THERMODYNAMIC
+# ───────────────────────────────────────────────────────────────────────────
+[phase2_thermodynamic]
+enabled = true
+initial_temperature = 1.5        # Slightly higher start for more exploration
+final_temperature = 0.001
+cooling_rate = 0.95              # Slightly faster cooling for efficiency
+steps_per_temp = 24000           # Aggressive equilibration
+compaction_enabled = true
+compaction_threshold = 0.08
+num_temps = 72                   # ULTRA-FINE temperature schedule
+num_replicas = 64
+t_min = 0.001
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 3: QUANTUM CONFLICT REDUCTION (Agent 1's Strategy)
+# ───────────────────────────────────────────────────────────────────────────
+[phase3_quantum]
+enabled = true
+gpu_enabled = true
+evolution_time = 0.15
+coupling_strength = 10.0         # Agent 1: INCREASED from 8.0 (stronger bonds)
+max_colors = 17
+num_qubits = 125
+use_complex_amplitudes = true
+evolution_iterations = 400       # Agent 1: DOUBLED from 200 (2x refinement time)
+transverse_field = 2.0           # Agent 1: INCREASED from 1.5 (2x tunneling)
+interference_decay = 0.005       # Agent 1: REDUCED from 0.01 (preserve coherence)
+schedule_type = "exponential"
+stochastic_measurement = true
+target_chromatic = 17
+max_colors_hard_limit = 17       # Agent 2: Hard lock (NO expansion)
+
+# ⚠️ CRITICAL: Chemical potential must be increased in GPU kernel
+# Location: prism-gpu/src/kernels/quantum.cu line 431
+# Change: float chemical_potential = 0.6f → 0.85f
+# This is ESSENTIAL for conflict reduction. Without it, optimization is incomplete.
+
+[phase3_pimc]
+enabled = true
+num_replicas = 32
+dimensions = 125
+beta = 3.0
+delta_tau = 0.06
+transverse_field = 2.0           # INCREASED to match quantum phase
+coupling_strength = 2.0
+mc_steps = 200                   # INCREASED from 150
+use_sparse = false
+gpu_enabled = true
+
+[phase4_geodesic]
+enabled = true
+distance_threshold = 3
+centrality_weight = 1.5
+gpu_enabled = true
+
+[phase5_geodesic_flow]
+enabled = true
+flow_iterations = 120
+flow_strength = 0.4
+diffusion_rate = 0.25
+
+[phase6_tda]
+enabled = true
+persistence_threshold = 0.40
+max_dimension = 2
+coherence_cv_threshold = 0.20
+vietoris_rips_radius = 2.0
+gpu_enabled = true
+
+[phase7_ensemble]
+enabled = true
+num_replicas = 16
+exchange_interval = 10
+temperature_range = [0.001, 1.0]
+diversity_weight = 0.3
+consensus_threshold = 0.85
+gpu_enabled = true
+
+[metaphysical_coupling]
+enabled = true
+geometry_stress_weight = 2.0
+feedback_strength = 1.2
+hotspot_threshold = 3
+stress_decay_rate = 0.80
+overlap_penalty = 2.0
+
+# ───────────────────────────────────────────────────────────────────────────
+# PHASE 4/5: ULTRA-AGGRESSIVE MEMETIC REPAIR (Agent 2's Strategy)
+# ───────────────────────────────────────────────────────────────────────────
+[memetic]
+enabled = true
+population_size = 200            # Agent 2: MASSIVE (3.3x from baseline)
+mutation_rate = 0.40             # Agent 2: EXTREME (2.6x from baseline)
+crossover_rate = 0.95            # Slightly increased for more mixing
+elite_fraction = 0.20            # Preserve top 20% of population
+max_generations = 1500           # Agent 2: EXTENSIVE search (5x from baseline)
+local_search_intensity = 0.99    # MAXIMUM intensity
+tournament_size = 5
+convergence_threshold = 50
+local_search_depth = 75000       # Agent 2: MASSIVE DSATUR (3x from baseline)
+
+# ───────────────────────────────────────────────────────────────────────────
+# DSATUR: ABSOLUTE 17-COLOR ENFORCEMENT
+# ───────────────────────────────────────────────────────────────────────────
+[dsatur]
+max_colors = 17
+backtrack_depth = 150            # Maximum allowed backtracking
+early_termination = false
+conflict_penalty = 10000.0       # EXTREME penalty for violating 17-color limit
+use_degree_ordering = true
+use_saturation_heuristic = true
+
+[telemetry]
+enabled = true
+capture_all_phases = true
+
+[logging]
+level = "info"

@@ -1,0 +1,153 @@
+# World Record Ultra-Massive Config for 8x B200 GPUs
+# Single-strategy deep exploration with distributed phases
+# Total VRAM: 1440GB (8x 180GB), Using: ~880GB (61%)
+# Target: DSJC1000.5 world record (83 colors or better)
+
+profile = "ultra_massive_8xb200"
+version = "1.0.0"
+target_chromatic = 83
+deterministic = false
+max_runtime_hours = 48.0  # Extended for massive scale
+seed = 42
+
+# CPU Configuration - Use all cores on RunPod instance
+[cpu]
+threads = 192  # Use all vCPUs
+pin_pool = false
+work_steal = true
+parallel_io = true
+
+# Initial Coloring Strategy
+[initial_coloring]
+strategy = "spectral"  # Proven good (127 colors baseline)
+
+# Multi-GPU Configuration - 8x B200 GPUs
+[multi_gpu]
+enabled = true
+num_gpus = 8
+devices = [0, 1, 2, 3, 4, 5, 6, 7]
+enable_peer_access = true
+enable_nccl = false  # Start without NCCL, add later if needed
+strategy = "distributed_phases"
+
+# Primary GPU Configuration
+[gpu]
+device_id = 0  # Primary device (others specified in multi_gpu)
+streams = 4
+batch_size = 16384  # 4x larger for B200
+enable_reservoir_gpu = true
+enable_te_gpu = true
+enable_statmech_gpu = true
+enable_quantum_gpu = true
+enable_pimc_gpu = false  # Disable for now
+enable_thermo_gpu = true
+enable_tda_gpu = false
+
+# Orchestrator - Phase Control
+[orchestrator]
+use_reservoir_prediction = true
+use_active_inference = true
+use_transfer_entropy = true
+use_geodesic_features = false  # Disable to save time
+use_thermodynamic_equilibration = true
+use_pimc = false
+use_quantum_classical_hybrid = true
+use_gnn_screening = false
+use_adp_learning = true
+use_tda = false
+use_multiscale_analysis = true
+use_ensemble_consensus = true
+restarts = 1  # Single ultra-deep run
+early_stop_no_improve_iters = 10
+checkpoint_minutes = 30
+adp_dsatur_depth = 50000
+adp_quantum_iterations = 100
+adp_thermo_num_temps = 2000
+
+# Neuromorphic Reservoir Computing
+[neuromorphic]
+enabled = true
+reservoir_size = 1000
+spectral_radius = 0.9
+leak_rate = 0.3
+input_scaling = 0.5
+
+# DSATUR Configuration
+[dsatur]
+geodesic_weight = 0.0
+reservoir_weight = 0.5
+ai_weight = 0.5
+tie_break = "quantum_then_thermo"
+
+# Quantum-Classical Hybrid - Massively Scaled
+[quantum]
+iterations = 50
+target_chromatic = 83
+depth = 20               # Ultra-deep (vs 8 current)
+attempts = 80000         # Distributed across 8 GPUs (10K each)
+beta = 0.98
+temperature = 0.5
+
+# Memetic Algorithm - Population Distributed Across GPUs
+[memetic]
+population_size = 8000   # 1000 per GPU
+elite_size = 32
+generations = 10000
+mutation_rate = 0.12
+tournament_size = 5
+local_search_depth = 50000
+use_tsp_guidance = true
+tsp_weight = 0.20
+
+# Thermodynamic Equilibration - Replica Distributed Across GPUs
+[thermo]
+replicas = 10000         # Distributed across 8 GPUs (1250 each)
+num_temps = 2000         # 250 per GPU
+exchange_interval = 20
+t_min = 0.00001          # Ultra-fine temperature
+t_max = 100.0            # Extreme exploration
+steps_per_temp = 20000   # Deep equilibration
+batch_size = 2000
+damping = 0.02
+schedule = "geometric"
+
+# Path Integral Monte Carlo (disabled for initial run)
+[pimc]
+replicas = 48
+beads = 48
+beta = 1.0
+tau = 0.1
+steps = 20000
+
+# Adaptive Dynamic Programming
+[adp]
+epsilon = 0.3
+epsilon_decay = 0.995
+epsilon_min = 0.05
+alpha = 0.1
+gamma = 0.95
+
+# Iterative Refinement
+[iterative]
+enabled = true
+max_passes = 2  # Fewer passes since each is ultra-deep
+min_delta = 1
+
+# Hyperparameter Tuning
+[hypertune]
+enabled = true
+stall_threshold = 200
+efficiency_threshold = 0.4
+
+# Transfer Entropy Configuration
+[transfer_entropy]
+tau = 1
+history_length = 10
+num_bins = 8
+coupling_threshold = 0.1
+batch_size = 1024
+
+# Geodesic Features (disabled)
+[geodesic]
+num_landmarks = 50
+epsilon = 0.1

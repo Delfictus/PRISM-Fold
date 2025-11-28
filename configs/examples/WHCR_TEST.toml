@@ -1,0 +1,43 @@
+# WHCR Test Configuration - Forces conflicts to test repair functionality
+
+[graph]
+enable_preprocessing = false
+
+[phases]
+phase0_enabled = true
+phase1_enabled = true
+phase2_enabled = true
+phase3_enabled = true
+phase4_enabled = false  # Skip to get conflicts faster
+phase5_enabled = false
+phase6_enabled = false
+phase7_enabled = false
+
+[phase2]
+# Aggressive settings to force conflicts
+initial_temperature = 5.0  # Very high for chaos
+annealing_factor = 0.5     # Fast cooling
+target_color_reduction = 14 # Force down to ~10 colors
+max_rounds = 5
+max_iterations_per_round = 100
+allow_temporary_conflicts = true
+conflict_penalty_weight = 0.1  # Low penalty allows more conflicts
+
+[phase3]
+# Very aggressive quantum settings
+target_colors = 15  # Force low colors
+precision = "mixed"
+iterations = 200
+coupling_strength = 5.0
+enable_superposition = true
+quantum_annealing_schedule = "exponential"
+
+[whcr]
+enabled = true
+max_iterations_per_level = 100
+precision_mode = "mixed"
+enable_dendritic = false  # Disabled due to parameter issues
+color_addition_budget = 5
+
+[memetic]
+enabled = false

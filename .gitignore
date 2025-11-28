@@ -1,0 +1,82 @@
+# Rust build outputs
+target/
+**/target/
+
+# Build artifacts
+*.rlib
+*.a
+*.o
+*.so
+*.so.*
+*.dylib
+*.dll
+*.dwp
+
+# ONNX Runtime libraries (third-party binaries)
+libonnxruntime*.so
+libonnxruntime*.so.*
+libprism*.rlib
+
+# Compiled binaries/executables (no extension)
+comprehensive_gpu_benchmark
+test_*
+benchmark_*
+prism_gpu_working
+
+# CUDA/ptx build products
+*.cubin
+*.fatbin
+*.nvvm
+# Keep PTX kernels in target/ptx/ for distribution
+# *.ptx
+
+# Local deps and caches
+deps/
+.cache/
+.cargo/
+.fingerprint/
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs and results
+results/
+logs/
+*.log
+
+# Temp
+tmp/
+/tmp/
+*.tmp
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Environment variables with API keys (NEVER commit!)
+.env
+.env.local
+.env.*.local
+
+# Cargo lock for libraries (keep for binary/application)
+# Cargo.lock
+
+# Git backup
+.git.backup/
+
+# Generated artifacts
+*.deb
+*.tar.gz
+*.tgz
+output/
+
+# Editor backups
+*.swp
+*.swo
+*~
+*.launcher-backup

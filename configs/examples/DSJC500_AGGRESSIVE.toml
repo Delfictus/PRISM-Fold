@@ -1,0 +1,120 @@
+# DSJC500.5 Aggressive Configuration - NO WHCR
+# Target: Optimal 48-color solution with 0 conflicts
+
+[phase0]
+# Dendritic Reservoir with aggressive coupling
+sparsity = 0.3
+activation_threshold = 0.5
+branch_factor = 4
+coupling_strength = 0.9
+enable_gpu = true
+
+[phase1]
+# Active Inference with high prior precision
+prior_precision = 10.0
+learning_rate = 0.3
+inference_iterations = 100
+belief_update_rate = 0.5
+enable_gpu = true
+
+[phase2]
+# Thermodynamic with aggressive annealing
+type = "thermodynamic"
+max_iterations_per_round = 50000  # Very deep exploration
+conflict_penalty_weight = 100.0  # Heavy conflict penalty
+initial_temperature = 5.0
+annealing_factor = 0.98  # Slower cooling
+replica_count = 16  # More replicas for parallel exploration
+allow_temporary_conflicts = false  # Strict - no conflicts allowed
+constraint_violation_penalty = 50.0
+enable_gpu = true
+
+[phase3]
+# Quantum with aggressive chemical potential
+type = "quantum"
+target_colors = 48  # DSJC500.5 chromatic number
+chemical_potential = 1.5  # Very aggressive μ
+coupling_strength = 15.0
+enable_memetic_boost = true
+memetic_intensity = 0.95  # Nearly maximal
+enable_gpu = true
+
+[phase4]
+# Geodesic with tight distance threshold
+distance_threshold = 2.0  # Strict locality
+enable_gpu = true
+
+[phase5]
+# GNN with deep propagation
+num_layers = 5
+hidden_dim = 128
+learning_rate = 0.1
+training_epochs = 200
+enable_gpu = true
+
+[phase6]
+# TDA with fine-grained analysis
+persistence_threshold = 0.05  # Capture fine structure
+max_dimension = 2
+num_landmarks = 200
+enable_gpu = true
+
+[phase7]
+# Transfer entropy with strong coupling
+entropy_threshold = 0.3
+transfer_rate = 0.8
+enable_gpu = true
+
+[mec]
+# Molecular emergent computing
+reaction_rate = 0.9
+diffusion_coefficient = 0.5
+catalyst_concentration = 0.8
+enable_gpu = true
+
+[memetic]
+# AGGRESSIVE HEAD-FIRST MEMETIC CONFIGURATION
+local_search_probability = 0.95  # Almost always search
+local_search_iterations = 500  # Deep local optimization
+kempe_chain_attempts = 100  # Extensive chain exploration
+conflict_resolution_mode = "head"  # Head-first aggressive mode
+enable_elite_preservation = true
+elite_size = 5
+crossover_rate = 0.8
+mutation_rate = 0.3
+population_diversity_threshold = 0.2
+adaptive_operator_selection = true
+# Head algorithm specific settings
+greedy_improvement = true  # Always take first improvement found
+exhaustive_neighborhood = false  # Don't wait for best, take first good move
+aggressive_conflict_targeting = true  # Target highest-conflict vertices first
+parallel_chains = true  # Run multiple Kempe chains in parallel
+
+[whcr]
+# WHCR COMPLETELY DISABLED
+enabled = false  # CRITICAL: Keep disabled until algorithmic fixes applied
+
+[orchestrator]
+# Pipeline control
+checkpoint_interval = 100
+enable_telemetry = true
+telemetry_port = 9090
+convergence_threshold = 0.0001  # Strict convergence
+max_stall_iterations = 1000
+adaptive_phase_switching = true
+enable_gpu_profiling = true
+
+[gpu]
+# GPU settings for large graph
+block_size = 256  # Optimal for DSJC500
+shared_memory_per_block = 49152
+max_registers_per_thread = 64
+prefer_l1_cache = false  # Prefer shared memory
+enable_tensor_cores = true
+
+[logging]
+# Detailed logging for monitoring
+level = "info"
+show_progress = true
+save_intermediate_states = true
+checkpoint_dir = "checkpoints/dsjc500_aggressive"

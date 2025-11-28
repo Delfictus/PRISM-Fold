@@ -1,0 +1,15 @@
+# Quick Test Configuration
+# Relaxed target for faster validation testing
+
+target_chromatic = 100
+max_runtime_hours = 1.0
+num_workers = 8
+
+# Minimal phases for quick testing
+use_reservoir_prediction = true
+use_active_inference = false
+use_adp_learning = false
+use_thermodynamic_equilibration = false
+use_quantum_classical_hybrid = true
+use_multiscale_analysis = false
+use_ensemble_consensus = false

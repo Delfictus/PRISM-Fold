@@ -1,0 +1,46 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+**/*.pdb
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation (keep essential docs)
+*.md
+!README.md
+!RUN_8XB200_GUIDE.md
+
+# Results and logs (empty on build)
+results/
+checkpoints/
+*.log
+*.jsonl
+
+# Worktrees
+worktrees/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Large test files
+experiments/
+artifacts/
+baseline-v1.0/
+backups/
+
+# Build scripts (keep in image)
+!run_8gpu_world_record.sh
+!monitor_gpus.sh
+!entrypoint.sh

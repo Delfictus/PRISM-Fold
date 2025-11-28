@@ -1,0 +1,19 @@
+[package]
+name = "shared-types"
+version = "0.1.0"
+edition = "2021"
+authors = ["ARES Team"]
+
+[dependencies]
+# Core types have zero dependencies
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+# Config registry dependencies (only with std feature)
+once_cell = { version = "1.19", optional = true }
+serde_json = { version = "1.0", optional = true }
+toml = { version = "0.8", optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+std = ["serde", "dep:once_cell", "dep:serde_json", "dep:toml"]
