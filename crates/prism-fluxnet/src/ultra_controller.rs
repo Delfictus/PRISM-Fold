@@ -15,6 +15,7 @@ use prism_core::{KernelTelemetry, RuntimeConfig};
 
 #[cfg(feature = "mbrl")]
 use crate::mbrl::DynaFluxNet;
+use crate::mbrl_integration::MBRLIntegration;
 
 /// State discretization for Q-table
 ///
@@ -242,6 +243,12 @@ pub struct UltraFluxNetController {
     /// MBRL world model (optional, requires "mbrl" feature)
     #[cfg(feature = "mbrl")]
     world_model: Option<DynaFluxNet>,
+
+    /// MBRL integration (always available, gracefully degrades)
+    mbrl_integration: MBRLIntegration,
+
+    /// Use MBRL for action selection (when available)
+    use_mbrl_planning: bool,
 }
 
 impl UltraFluxNetController {
@@ -269,6 +276,8 @@ impl UltraFluxNetController {
             stagnation_counter: 0,
             #[cfg(feature = "mbrl")]
             world_model: None,
+            mbrl_integration: MBRLIntegration::new(),
+            use_mbrl_planning: true, // Enable MBRL by default (auto-falls back if unavailable)
         }
     }
 
@@ -306,13 +315,22 @@ impl UltraFluxNetController {
     ) -> DiscreteAction {
         let state = DiscreteState::from_telemetry(telemetry, config, self.stagnation_counter);
 
-        // Epsilon-greedy action selection
-        let action = if rand::random::<f64>() < self.epsilon {
-            // Explore: random action
-            DiscreteAction::ALL[rand::random::<usize>() % DiscreteAction::ALL.len()]
+        // Try MBRL planning first (if enabled and available)
+        let action = if self.use_mbrl_planning {
+            if let Some(mbrl_action) = self.mbrl_integration.predict_best_action(
+                telemetry,
+                config,
+                self.stagnation_counter,
+            ) {
+                log::debug!("Using MBRL-planned action: {:?}", mbrl_action);
+                mbrl_action
+            } else {
+                // MBRL unavailable, fall back to Q-learning
+                self.select_action_epsilon_greedy(&state)
+            }
         } else {
-            // Exploit: best Q-value action
-            self.best_action(&state)
+            // MBRL disabled, use pure Q-learning
+            self.select_action_epsilon_greedy(&state)
         };
 
         // Store for next update
@@ -320,6 +338,17 @@ impl UltraFluxNetController {
         self.prev_action = Some(action);
 
         action
+    }
+
+    /// Epsilon-greedy action selection (internal helper)
+    fn select_action_epsilon_greedy(&self, state: &DiscreteState) -> DiscreteAction {
+        if rand::random::<f64>() < self.epsilon {
+            // Explore: random action
+            DiscreteAction::ALL[rand::random::<usize>() % DiscreteAction::ALL.len()]
+        } else {
+            // Exploit: best Q-value action
+            self.best_action(state)
+        }
     }
 
     /// Update Q-values after observing reward
@@ -364,7 +393,7 @@ impl UltraFluxNetController {
 
         // MBRL: Generate synthetic experience (if enabled)
         #[cfg(feature = "mbrl")]
-        if let Some(ref mut world_model) = self.world_model {
+        if let Some(ref mut _world_model) = self.world_model {
             // Synthetic experience generation would happen here
             // This requires conversion between DiscreteAction and RuntimeConfigDelta
             // Omitted for initial implementation
@@ -562,6 +591,59 @@ impl UltraFluxNetController {
     /// * `epsilon` - New exploration rate (typically 0.05 - 0.5)
     pub fn set_epsilon(&mut self, epsilon: f64) {
         self.epsilon = epsilon.clamp(self.epsilon_min, 1.0);
+    }
+
+    /// Enable MBRL planning
+    ///
+    /// When enabled, the controller will attempt to use MBRL world model predictions
+    /// for action selection. Gracefully falls back to Q-learning if unavailable.
+    pub fn enable_mbrl_planning(&mut self) {
+        self.use_mbrl_planning = true;
+        log::info!("MBRL planning enabled");
+    }
+
+    /// Disable MBRL planning
+    ///
+    /// Forces pure Q-learning (epsilon-greedy) action selection, even if MBRL
+    /// world model is available.
+    pub fn disable_mbrl_planning(&mut self) {
+        self.use_mbrl_planning = false;
+        log::info!("MBRL planning disabled (using pure Q-learning)");
+    }
+
+    /// Check if MBRL is available
+    ///
+    /// # Returns
+    /// `true` if MBRL world model is loaded and functional
+    pub fn is_mbrl_available(&self) -> bool {
+        self.mbrl_integration.is_mbrl_available()
+    }
+
+    /// Get MBRL status string
+    ///
+    /// # Returns
+    /// Human-readable status of MBRL integration
+    pub fn mbrl_status(&self) -> &'static str {
+        self.mbrl_integration.status()
+    }
+
+    /// Get mutable reference to MBRL integration
+    ///
+    /// Allows advanced configuration of MBRL parameters (planning horizon,
+    /// number of candidates, etc.)
+    ///
+    /// # Returns
+    /// Mutable reference to MBRLIntegration
+    pub fn mbrl_integration_mut(&mut self) -> &mut MBRLIntegration {
+        &mut self.mbrl_integration
+    }
+
+    /// Get reference to MBRL integration
+    ///
+    /// # Returns
+    /// Reference to MBRLIntegration
+    pub fn mbrl_integration(&self) -> &MBRLIntegration {
+        &self.mbrl_integration
     }
 }
 
