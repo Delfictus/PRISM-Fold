@@ -34,6 +34,11 @@
 
 pub mod core;
 pub mod curriculum;
+pub mod ultra_controller;
+
+// MBRL module (requires `mbrl` feature)
+#[cfg(feature = "mbrl")]
+pub mod mbrl;
 
 // Re-export commonly used items
 pub use core::actions::UniversalAction;
@@ -43,4 +48,13 @@ pub use core::state::{DiscretizationMode, UniversalRLState};
 // Re-export curriculum types
 pub use curriculum::{
     CurriculumBank, CurriculumEntry, CurriculumMetadata, DifficultyProfile, GraphStats,
+};
+
+// Re-export Ultra FluxNet Controller
+pub use ultra_controller::{DiscreteAction, DiscreteState, UltraFluxNetController};
+
+// Re-export MBRL types (when feature enabled)
+#[cfg(feature = "mbrl")]
+pub use mbrl::{
+    DynaFluxNet, Experience, KernelState, MBRLWorldModel, PredictedOutcome, RuntimeConfigDelta,
 };

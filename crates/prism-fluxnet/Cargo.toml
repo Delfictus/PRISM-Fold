@@ -30,6 +30,14 @@ env_logger = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+# ONNX Runtime for MBRL (optional)
+ort = { workspace = true, optional = true }
+ndarray = { workspace = true, optional = true }
+
+[features]
+default = []
+mbrl = ["ort", "ndarray"]
+
 [dev-dependencies]
 
 [[bin]]

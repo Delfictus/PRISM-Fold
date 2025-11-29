@@ -34,11 +34,13 @@
 pub mod dimacs;
 pub mod domain;
 pub mod errors;
+pub mod runtime_config;
 pub mod traits;
 pub mod types;
 
 // Re-export commonly used items
 pub use errors::PrismError;
+pub use runtime_config::{KernelTelemetry, RuntimeConfig};
 pub use traits::{
     PhaseContext, PhaseController, PhaseOutcome, PhaseTelemetry, WarmstartContributor,
 };
