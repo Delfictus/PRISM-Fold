@@ -318,7 +318,7 @@ impl MultiGpuContext {
         if let Some(ref coord) = self.replica_coordinator {
             let pool = coord.pool();
             if idx < pool.num_devices() {
-                return pool.device(idx).clone();
+                return pool.device(idx);
             }
         }
 
@@ -333,7 +333,7 @@ impl MultiGpuContext {
     /// containing the fallback device.
     pub fn devices(&self) -> Vec<Arc<CudaContext>> {
         if let Some(ref coord) = self.replica_coordinator {
-            coord.pool().devices().to_vec()
+            coord.pool().devices()
         } else {
             vec![self.single_device.clone()]
         }

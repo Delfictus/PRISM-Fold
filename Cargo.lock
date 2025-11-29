@@ -3271,6 +3271,7 @@ name = "prism-gpu"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "crossbeam-utils",
  "cudarc",
  "env_logger",
  "hex",

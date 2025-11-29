@@ -84,6 +84,7 @@ petgraph = "0.6"
 
 # Parallelism
 rayon = "1.7"
+crossbeam-utils = "0.8"
 
 # Telemetry and metrics
 prometheus = "0.13"

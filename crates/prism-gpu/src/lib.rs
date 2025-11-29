@@ -48,15 +48,22 @@ pub use dendritic_whcr::DendriticReservoirGpu as DendriticWhcrGpu;
 pub use floyd_warshall::FloydWarshallGpu;
 pub use lbs::LbsGpu;
 pub use molecular::{MDParams, MDResults, MolecularDynamicsGpu, Particle};
-pub use multi_device_pool::{MultiGpuDevicePool, P2PCapability, ReplicaExchangeCoordinator};
+pub use multi_device_pool::{
+    CrossGpuReplicaManager, DeviceCapability, ExchangePair, ExchangeResult, GpuLoadBalancer,
+    MigrationPlan, MultiGpuDevicePool, P2PCapability, P2PMemoryManager, ReduceOp,
+    ReplicaExchangeCoordinator, ReplicaHandle, UnifiedBuffer,
+};
 pub use multi_gpu::{GpuMetrics, MultiGpuManager, SchedulingPolicy};
 pub use multi_gpu_integration::MultiGpuContext;
 pub use pimc::{PimcGpu, PimcMetrics, PimcObservables, PimcParams};
 pub use quantum::QuantumEvolutionGpu;
-pub use stream_integration::ManagedGpuContext;
+pub use stream_integration::{
+    AsyncCoordinator, CompletedOp, ManagedGpuContext, PipelineStage as GpuPipelineStage,
+    PipelineStageManager, PipelineStats, TripleBuffer as GpuTripleBuffer,
+};
 pub use stream_manager::{
-    AsyncPipelineCoordinator, ManagedStream, PipelineStage, StreamPool, StreamPurpose,
-    TripleBuffer,
+    AsyncPipelineCoordinator, ManagedStream, PipelineStage as CpuPipelineStage, StreamPool,
+    StreamPurpose, TripleBuffer as CpuTripleBuffer,
 };
 pub use tda::TdaGpu;
 pub use thermodynamic::ThermodynamicGpu;

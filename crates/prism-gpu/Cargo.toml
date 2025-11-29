@@ -21,6 +21,7 @@ log = { workspace = true }
 
 # Thread-safe data structures
 parking_lot = { workspace = true }
+crossbeam-utils = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -29,6 +30,9 @@ serde_json = { workspace = true }
 # Cryptography (for PTX signature verification)
 sha2 = { workspace = true }
 hex = { workspace = true }
+
+# Random number generation
+rand = { workspace = true }
 
 [dev-dependencies]
 # Testing utilities
