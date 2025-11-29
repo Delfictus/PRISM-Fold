@@ -68,17 +68,17 @@ $L__BB0_2:
 	shl.b32 	%r19, %r5, 2;
 	add.s32 	%r20, %r14, %r19;
 	ld.shared.f32 	%f3, [%r20];
-	setp.geu.f32 	%p6, %f3, 0f7F7FFFFF;
+	setp.geu.ftz.f32 	%p6, %f3, 0f7F7FFFFF;
 	shl.b32 	%r21, %r5, 7;
 	add.s32 	%r22, %r13, %r21;
 	add.s32 	%r24, %r22, %r15;
 	ld.shared.f32 	%f4, [%r24];
-	setp.geu.f32 	%p7, %f4, 0f7F7FFFFF;
+	setp.geu.ftz.f32 	%p7, %f4, 0f7F7FFFFF;
 	or.pred  	%p8, %p6, %p7;
 	@%p8 bra 	$L__BB0_6;
 
-	add.f32 	%f5, %f3, %f4;
-	setp.geu.f32 	%p9, %f5, %f8;
+	add.ftz.f32 	%f5, %f3, %f4;
+	setp.geu.ftz.f32 	%p9, %f5, %f8;
 	@%p9 bra 	$L__BB0_6;
 
 	st.shared.f32 	[%r4], %f5;
@@ -167,13 +167,13 @@ $L__BB1_5:
 	mul.wide.s32 	%rd7, %r25, 4;
 	add.s64 	%rd8, %rd1, %rd7;
 	ld.shared.f32 	%f9, [%r24];
-	setp.lt.f32 	%p10, %f9, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p10, %f9, 0f7F7FFFFF;
 	and.pred  	%p11, %p1, %p10;
 	ld.global.f32 	%f10, [%rd8];
-	setp.lt.f32 	%p12, %f10, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p12, %f10, 0f7F7FFFFF;
 	and.pred  	%p13, %p11, %p12;
-	add.f32 	%f11, %f9, %f10;
-	setp.lt.f32 	%p14, %f11, %f14;
+	add.ftz.f32 	%f11, %f9, %f10;
+	setp.lt.ftz.f32 	%p14, %f11, %f14;
 	and.pred  	%p15, %p13, %p14;
 	selp.f32 	%f14, %f11, %f14, %p15;
 
@@ -257,16 +257,16 @@ $L__BB2_5:
 	mul.wide.s32 	%rd7, %r20, 4;
 	add.s64 	%rd8, %rd1, %rd7;
 	ld.global.f32 	%f9, [%rd8];
-	setp.lt.f32 	%p10, %f9, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p10, %f9, 0f7F7FFFFF;
 	and.pred  	%p11, %p1, %p10;
 	shl.b32 	%r21, %r8, 7;
 	add.s32 	%r23, %r15, %r21;
 	add.s32 	%r25, %r23, %r17;
 	ld.shared.f32 	%f10, [%r25];
-	setp.lt.f32 	%p12, %f10, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p12, %f10, 0f7F7FFFFF;
 	and.pred  	%p13, %p11, %p12;
-	add.f32 	%f11, %f9, %f10;
-	setp.lt.f32 	%p14, %f11, %f14;
+	add.ftz.f32 	%f11, %f9, %f10;
+	setp.lt.ftz.f32 	%p14, %f11, %f14;
 	and.pred  	%p15, %p13, %p14;
 	selp.f32 	%f14, %f11, %f14, %p15;
 
@@ -372,15 +372,15 @@ $L__BB3_7:
 	shl.b32 	%r32, %r10, 2;
 	add.s32 	%r33, %r19, %r32;
 	ld.shared.f32 	%f12, [%r33];
-	setp.lt.f32 	%p15, %f12, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p15, %f12, 0f7F7FFFFF;
 	shl.b32 	%r34, %r10, 7;
 	add.s32 	%r36, %r24, %r34;
 	add.s32 	%r38, %r36, %r20;
 	ld.shared.f32 	%f13, [%r38];
-	setp.lt.f32 	%p16, %f13, 0f7F7FFFFF;
+	setp.lt.ftz.f32 	%p16, %f13, 0f7F7FFFFF;
 	and.pred  	%p17, %p15, %p16;
-	add.f32 	%f14, %f12, %f13;
-	setp.lt.f32 	%p18, %f14, %f18;
+	add.ftz.f32 	%f14, %f12, %f13;
+	setp.lt.ftz.f32 	%p18, %f14, %f18;
 	and.pred  	%p19, %p17, %p18;
 	selp.f32 	%f18, %f14, %f18, %p19;
 

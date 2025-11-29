@@ -414,7 +414,7 @@ $L__BB4_4:
 	mov.b64 	{%temp, %r19}, %fd76;
 	}
 	mov.b32 	%f1, %r19;
-	setp.eq.f32 	%p4, %f1, 0f00000000;
+	setp.eq.ftz.f32 	%p4, %f1, 0f00000000;
 	selp.f64 	%fd78, 0dFFF0000000000000, %fd22, %p4;
 
 $L__BB4_8:
@@ -592,7 +592,7 @@ $L__BB5_4:
 	mov.b64 	{%temp, %r19}, %fd65;
 	}
 	mov.b32 	%f1, %r19;
-	setp.eq.f32 	%p4, %f1, 0f00000000;
+	setp.eq.ftz.f32 	%p4, %f1, 0f00000000;
 	selp.f64 	%fd67, 0dFFF0000000000000, %fd18, %p4;
 
 $L__BB5_8:

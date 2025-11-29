@@ -17,6 +17,13 @@ serde_json = { workspace = true }
 # Utilities
 log = { workspace = true }
 
+# GPU support (optional)
+cudarc = { workspace = true, optional = true }
+
+[features]
+default = []
+cuda = ["cudarc"]
+
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3.8"

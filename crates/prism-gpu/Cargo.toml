@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 # Internal dependencies
-prism-core = { workspace = true }
+prism-core = { workspace = true, features = ["cuda"] }
 
 # GPU acceleration
 cudarc = { workspace = true }

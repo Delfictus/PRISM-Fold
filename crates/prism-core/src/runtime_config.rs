@@ -395,3 +395,22 @@ mod tests {
         assert!(!telem.is_valid());
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// GPU FFI Traits (cudarc 0.9 compatibility)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[cfg(feature = "cuda")]
+mod cuda_impls {
+    use super::*;
+
+    // SAFETY: RuntimeConfig is #[repr(C)] with only primitive types and fixed-size arrays.
+    // All fields are valid when zero-initialized.
+    unsafe impl cudarc::driver::ValidAsZeroBits for RuntimeConfig {}
+    unsafe impl cudarc::driver::DeviceRepr for RuntimeConfig {}
+
+    // SAFETY: KernelTelemetry is #[repr(C)] with only primitive types and fixed-size arrays.
+    // All fields are valid when zero-initialized.
+    unsafe impl cudarc::driver::ValidAsZeroBits for KernelTelemetry {}
+    unsafe impl cudarc::driver::DeviceRepr for KernelTelemetry {}
+}

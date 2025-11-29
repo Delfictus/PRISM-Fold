@@ -277,17 +277,17 @@ $L__BB4_2:
 	@%p2 bra 	$L__BB5_3;
 
 	cvt.rn.f32.s32 	%f4, %r3;
-	rcp.rn.f32 	%f5, %f4;
-	add.f32 	%f13, %f5, 0f3F800000;
+	rcp.approx.ftz.f32 	%f5, %f4;
+	add.ftz.f32 	%f13, %f5, 0f3F800000;
 
 $L__BB5_3:
 	cvt.rn.f32.s32 	%f6, %r5;
 	cvt.rn.f32.s32 	%f7, %r4;
-	div.rn.f32 	%f8, %f7, %f6;
-	add.f32 	%f9, %f8, 0f3F800000;
+	div.approx.ftz.f32 	%f8, %f7, %f6;
+	add.ftz.f32 	%f9, %f8, 0f3F800000;
 	cvt.rn.f32.s32 	%f10, %r2;
-	mul.f32 	%f11, %f13, %f10;
-	mul.f32 	%f12, %f9, %f11;
+	mul.ftz.f32 	%f11, %f13, %f10;
+	mul.ftz.f32 	%f12, %f11, %f9;
 	cvta.to.global.u64 	%rd7, %rd3;
 	shl.b64 	%rd8, %rd1, 2;
 	add.s64 	%rd9, %rd7, %rd8;
@@ -340,13 +340,13 @@ $L__BB5_4:
 	ld.global.u32 	%r7, [%rd10];
 	cvt.rn.f32.s32 	%f5, %r7;
 	cvt.rn.f32.s32 	%f6, %r2;
-	div.rn.f32 	%f8, %f5, %f6;
+	div.approx.ftz.f32 	%f8, %f5, %f6;
 
 $L__BB6_3:
 	cvta.to.global.u64 	%rd11, %rd4;
 	shl.b64 	%rd12, %rd1, 2;
 	add.s64 	%rd13, %rd11, %rd12;
-	add.f32 	%f7, %f1, %f8;
+	add.ftz.f32 	%f7, %f1, %f8;
 	st.global.f32 	[%rd13], %f7;
 
 $L__BB6_4:
