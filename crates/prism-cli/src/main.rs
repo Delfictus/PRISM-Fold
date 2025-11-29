@@ -981,23 +981,19 @@ fn main() -> Result<()> {
 
     if let Some(config_path) = &args.config {
         log::info!("Loading configuration from: {}", config_path);
-        let config_content = std::fs::read_to_string(config_path)?;
-        let toml_config: toml::Value = toml::from_str(&config_content)?;
+
+        // Load and parse config using serde
+        use prism_cli::config::PrismConfig;
+        let prism_config = PrismConfig::from_file(config_path)?;
+        prism_config.validate()?;
 
         // Extract phase2 config if present and override defaults
-        if let Some(phase2_table) = toml_config.get("phase2") {
-            if let Some(iterations) = phase2_table.get("iterations").and_then(|v| v.as_integer()) {
-                phase2_config.iterations = iterations as usize;
-            }
-            if let Some(replicas) = phase2_table.get("replicas").and_then(|v| v.as_integer()) {
-                phase2_config.replicas = replicas as usize;
-            }
-            if let Some(temp_min) = phase2_table.get("temp_min").and_then(|v| v.as_float()) {
-                phase2_config.temp_min = temp_min as f32;
-            }
-            if let Some(temp_max) = phase2_table.get("temp_max").and_then(|v| v.as_float()) {
-                phase2_config.temp_max = temp_max as f32;
-            }
+        if let Some(ref p2) = prism_config.phase2.or(prism_config.phase2_thermodynamic) {
+            phase2_config.iterations = p2.iterations;
+            phase2_config.replicas = p2.replicas;
+            phase2_config.temp_min = p2.temp_min;
+            phase2_config.temp_max = p2.temp_max;
+
             log::info!("Phase 2 configuration overridden from TOML");
             log::info!("  Iterations: {}", phase2_config.iterations);
             log::info!("  Replicas: {}", phase2_config.replicas);
@@ -1009,130 +1005,66 @@ fn main() -> Result<()> {
         }
 
         // Extract Phase 0 dendritic reservoir config if present
-        if let Some(phase0_table) = toml_config.get("phase0_dendritic") {
-            match toml::from_str::<prism_phases::phase0::Phase0Config>(&toml::to_string(
-                phase0_table,
-            )?) {
-                Ok(cfg) => {
-                    phase0_config = Some(cfg);
-                    log::info!("Phase 0 dendritic reservoir configuration loaded from TOML");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse phase0_dendritic config: {}, using defaults",
-                        e
-                    );
-                }
-            }
+        if let Some(ref cfg) = prism_config.phase0_dendritic {
+            phase0_config = Some(cfg.clone());
+            log::info!("Phase 0 dendritic reservoir configuration loaded from TOML");
         }
 
         // Extract Phase 1 active inference config if present
-        if let Some(phase1_table) = toml_config.get("phase1_active_inference") {
-            match toml::from_str::<prism_phases::phase1_active_inference::Phase1Config>(
-                &toml::to_string(phase1_table)?,
-            ) {
-                Ok(cfg) => {
-                    phase1_config = Some(cfg);
-                    log::info!("Phase 1 active inference configuration loaded from TOML");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse phase1_active_inference config: {}, using defaults",
-                        e
-                    );
-                }
-            }
+        if let Some(ref cfg) = prism_config.phase1_active_inference {
+            phase1_config = Some(cfg.clone());
+            log::info!("Phase 1 active inference configuration loaded from TOML");
         }
 
         // Extract phase3_quantum config if present
-        if let Some(phase3_table) = toml_config.get("phase3_quantum") {
-            phase3_config = Some(toml::from_str(&toml::to_string(phase3_table)?)?);
+        if let Some(ref cfg) = prism_config.phase3_quantum {
+            phase3_config = Some(cfg.clone());
             log::info!("Phase 3 quantum configuration loaded from TOML");
-            if let Some(ref cfg) = phase3_config {
-                log::info!("  Evolution time: {}", cfg.evolution_time);
-                log::info!("  Coupling strength: {}", cfg.coupling_strength);
-                log::info!("  Max colors: {}", cfg.max_colors);
-            }
+            log::info!("  Evolution time: {}", cfg.evolution_time);
+            log::info!("  Coupling strength: {}", cfg.coupling_strength);
+            log::info!("  Max colors: {}", cfg.max_colors);
         }
 
         // Extract Phase 4 geodesic config if present
-        if let Some(phase4_table) = toml_config.get("phase4_geodesic") {
-            match toml::from_str::<prism_phases::phase4_geodesic::Phase4Config>(&toml::to_string(
-                phase4_table,
-            )?) {
-                Ok(cfg) => {
-                    phase4_config = Some(cfg);
-                    log::info!("Phase 4 geodesic configuration loaded from TOML");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse phase4_geodesic config: {}, using defaults",
-                        e
-                    );
-                }
-            }
+        if let Some(ref cfg) = prism_config.phase4_geodesic {
+            phase4_config = Some(cfg.clone());
+            log::info!("Phase 4 geodesic configuration loaded from TOML");
         }
 
         // Extract Phase 6 TDA config if present
-        if let Some(phase6_table) = toml_config.get("phase6_tda") {
-            match toml::from_str::<prism_phases::phase6_tda::Phase6Config>(&toml::to_string(
-                phase6_table,
-            )?) {
-                Ok(cfg) => {
-                    phase6_config = Some(cfg);
-                    log::info!("Phase 6 TDA configuration loaded from TOML");
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse phase6_tda config: {}, using defaults", e);
-                }
-            }
+        if let Some(ref cfg) = prism_config.phase6_tda {
+            phase6_config = Some(cfg.clone());
+            log::info!("Phase 6 TDA configuration loaded from TOML");
         }
 
         // Extract Phase 7 Ensemble config if present
-        if let Some(phase7_table) = toml_config.get("phase7_ensemble") {
-            match toml::from_str::<prism_phases::phase7_ensemble::Phase7Config>(&toml::to_string(
-                phase7_table,
-            )?) {
-                Ok(cfg) => {
-                    phase7_config = Some(cfg);
-                    log::info!("Phase 7 Ensemble configuration loaded from TOML");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse phase7_ensemble config: {}, using defaults",
-                        e
-                    );
-                }
-            }
+        if let Some(ref cfg) = prism_config.phase7_ensemble {
+            phase7_config = Some(cfg.clone());
+            log::info!("Phase 7 Ensemble configuration loaded from TOML");
         }
 
         // Extract memetic config if present
-        if let Some(memetic_table) = toml_config.get("memetic") {
-            memetic_config = Some(toml::from_str(&toml::to_string(memetic_table)?)?);
+        if let Some(ref cfg) = prism_config.memetic {
+            memetic_config = Some(cfg.clone());
             log::info!("Memetic algorithm configuration loaded from TOML");
         }
 
         // Extract metaphysical coupling config if present
-        if let Some(coupling_table) = toml_config.get("metaphysical_coupling") {
-            metaphysical_coupling_config = Some(toml::from_str(&toml::to_string(coupling_table)?)?);
+        if let Some(ref cfg) = prism_config.metaphysical_coupling {
+            metaphysical_coupling_config = Some(cfg.clone());
             log::info!("Metaphysical coupling configuration loaded from TOML");
         }
 
         // Extract GNN config if present
-        if let Some(gnn_table) = toml_config.get("gnn") {
-            gnn_config = Some(toml::from_str(&toml::to_string(gnn_table)?)?);
+        if let Some(ref cfg) = prism_config.gnn {
+            gnn_config = Some(cfg.clone());
             log::info!("GNN configuration loaded from TOML");
         }
 
         // Extract telemetry path from pipeline config if present
-        if let Some(pipeline_table) = toml_config.get("pipeline") {
-            if let Some(path) = pipeline_table
-                .get("telemetry_path")
-                .and_then(|v| v.as_str())
-            {
-                telemetry_path_override = Some(path.to_string());
-                log::info!("Telemetry path override from TOML: {}", path);
-            }
+        if let Some(ref path) = prism_config.pipeline.telemetry_path {
+            telemetry_path_override = Some(path.clone());
+            log::info!("Telemetry path override from TOML: {}", path);
         }
     }
 
