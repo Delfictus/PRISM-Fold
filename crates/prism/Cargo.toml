@@ -20,16 +20,25 @@ prism-gpu = { workspace = true, features = ["cuda"] }
 prism-gnn = { workspace = true }
 prism-lbs = { workspace = true }
 prism-mec = { workspace = true }
-prism-cli = { path = "../prism-cli" }
 
 # TUI Framework
 ratatui = { version = "0.28", features = ["all-widgets"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 
+# Metrics Server (HTTP)
+axum = { workspace = true }
+prometheus = { workspace = true }
+
+# Graph processing (for GNN)
+petgraph = { workspace = true }
+
 # Async runtime
 tokio = { workspace = true }
 tokio-stream = "0.1"
 futures = "0.3"
+
+# Concurrent data structures
+parking_lot = "0.12"
 
 # CLI argument parsing (for initial args before TUI)
 clap = { workspace = true }

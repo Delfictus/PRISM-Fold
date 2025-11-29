@@ -3157,6 +3157,7 @@ name = "prism"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "clap",
  "crossterm",
@@ -3165,7 +3166,8 @@ dependencies = [
  "futures",
  "humantime",
  "log",
- "prism-cli",
+ "parking_lot",
+ "petgraph",
  "prism-core",
  "prism-fluxnet",
  "prism-gnn",
@@ -3174,6 +3176,7 @@ dependencies = [
  "prism-mec",
  "prism-phases",
  "prism-pipeline",
+ "prometheus",
  "ratatui",
  "serde",
  "serde_json",
@@ -3185,30 +3188,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "prism-cli"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "clap",
- "env_logger",
- "log",
- "petgraph",
- "prism-core",
- "prism-fluxnet",
- "prism-gnn",
- "prism-mec",
- "prism-phases",
- "prism-pipeline",
- "prometheus",
- "serde",
- "serde_json",
- "tokio",
- "toml",
 ]
 
 [[package]]

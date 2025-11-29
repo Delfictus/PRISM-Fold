@@ -1,4 +1,6 @@
 [workspace]
+# NOTE: This is an example/reference workspace configuration.
+# The actual workspace is defined in the root Cargo.toml.
 resolver = "2"
 members = [
     "prism-core",
@@ -8,14 +10,13 @@ members = [
     "prism-phases",
     "prism-whcr",
     "prism-pipeline",
-    "prism-cli",
-    # New specialized compute crates
+    # Specialized compute crates
     "prism-ontology",
     "prism-mec",
     "prism-physics",
     "prism-gnn",
     "prism-lbs",
-    # Legacy foundation crates (kept for migration)
+    # Foundation crates
     "foundation/shared-types",
     "foundation/prct-core",
     "foundation/quantum",

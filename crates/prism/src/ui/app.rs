@@ -5,11 +5,15 @@
 use anyhow::Result;
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{prelude::*, widgets::*};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
 
 use super::render;
 use super::theme::Theme;
 use crate::ai::AiDialogue;
+use crate::runtime::events::PrismEvent;
+use crate::runtime::state::StateStore;
 use crate::streaming::PipelineStream;
 use crate::widgets;
 
@@ -68,6 +72,9 @@ pub struct OptimizationState {
     pub replicas: Vec<ReplicaState>,
     pub quantum_amplitudes: Vec<(usize, f64)>, // (color, amplitude)
     pub quantum_coherence: f64,
+    pub dendritic_active_neurons: usize,
+    pub dendritic_total_neurons: usize,
+    pub dendritic_firing_rate: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +161,12 @@ pub struct App {
 
     /// GPU device ID
     gpu_device: usize,
+
+    /// Runtime state store (shared with runtime actors)
+    runtime_state: Option<Arc<StateStore>>,
+
+    /// Event receiver for runtime updates
+    event_receiver: Option<broadcast::Receiver<PrismEvent>>,
 }
 
 impl App {
@@ -247,7 +260,23 @@ impl App {
             frame: 0,
             show_help: false,
             gpu_device,
+            runtime_state: None,
+            event_receiver: None,
         })
+    }
+
+    /// Create a new application instance with runtime integration
+    pub fn new_with_runtime(
+        input: Option<String>,
+        mode: String,
+        gpu_device: usize,
+        runtime_state: Arc<StateStore>,
+        event_receiver: broadcast::Receiver<PrismEvent>,
+    ) -> Result<Self> {
+        let mut app = Self::new(input, mode, gpu_device)?;
+        app.runtime_state = Some(runtime_state);
+        app.event_receiver = Some(event_receiver);
+        Ok(app)
     }
 
     /// Main event loop
@@ -573,36 +602,198 @@ impl App {
     fn update(&mut self) -> Result<()> {
         self.frame += 1;
 
-        // Simulate progress for demo (would be real pipeline data in production)
-        if self.frame % 20 == 0 {
-            // Update running phase
-            for phase in &mut self.phases {
-                if phase.status == PhaseState::Running {
-                    phase.progress += 0.5;
-                    if phase.progress >= 100.0 {
-                        phase.status = PhaseState::Completed;
-                        phase.progress = 100.0;
-                    }
-                    break;
-                }
-            }
+        // Poll runtime events if connected to runtime
+        if self.event_receiver.is_some() {
+            // Process all available events without blocking
+            loop {
+                let event_result = self
+                    .event_receiver
+                    .as_mut()
+                    .unwrap()
+                    .try_recv();
 
-            // Start next phase if previous completed
-            let mut start_next = false;
-            for i in 0..self.phases.len() {
-                if self.phases[i].status == PhaseState::Completed && i + 1 < self.phases.len() {
-                    if self.phases[i + 1].status == PhaseState::Pending {
-                        start_next = true;
+                match event_result {
+                    Ok(event) => {
+                        self.process_runtime_event(event)?;
                     }
-                }
-            }
-            if start_next {
-                for phase in &mut self.phases {
-                    if phase.status == PhaseState::Pending {
-                        phase.status = PhaseState::Running;
+                    Err(broadcast::error::TryRecvError::Empty) => {
+                        // No more events available
+                        break;
+                    }
+                    Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                        log::warn!("UI lagged behind runtime, skipped {} events", skipped);
+                        // Continue processing newer events
+                    }
+                    Err(broadcast::error::TryRecvError::Closed) => {
+                        log::error!("Runtime event channel closed");
                         break;
                     }
                 }
+            }
+        } else {
+            // Fallback: simulate progress for demo (when not connected to runtime)
+            if self.frame % 20 == 0 {
+                // Update running phase
+                for phase in &mut self.phases {
+                    if phase.status == PhaseState::Running {
+                        phase.progress += 0.5;
+                        if phase.progress >= 100.0 {
+                            phase.status = PhaseState::Completed;
+                            phase.progress = 100.0;
+                        }
+                        break;
+                    }
+                }
+
+                // Start next phase if previous completed
+                let mut start_next = false;
+                for i in 0..self.phases.len() {
+                    if self.phases[i].status == PhaseState::Completed && i + 1 < self.phases.len() {
+                        if self.phases[i + 1].status == PhaseState::Pending {
+                            start_next = true;
+                        }
+                    }
+                }
+                if start_next {
+                    for phase in &mut self.phases {
+                        if phase.status == PhaseState::Pending {
+                            phase.status = PhaseState::Running;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process a runtime event and update UI state
+    fn process_runtime_event(&mut self, event: PrismEvent) -> Result<()> {
+        use crate::runtime::events::PhaseId;
+
+        match event {
+            PrismEvent::GraphLoaded { vertices, edges, density, estimated_chromatic } => {
+                self.dialogue.add_system_message(&format!(
+                    "Graph loaded: {} vertices, {} edges (density: {:.2}%)\n\
+                     Estimated chromatic number: {}",
+                    vertices, edges, density * 100.0, estimated_chromatic
+                ));
+            }
+
+            PrismEvent::PhaseStarted { phase, name } => {
+                let phase_idx = phase.index();
+                if phase_idx < self.phases.len() {
+                    self.phases[phase_idx].status = PhaseState::Running;
+                    self.phases[phase_idx].progress = 0.0;
+                }
+            }
+
+            PrismEvent::PhaseProgress { phase, iteration, max_iterations, colors, conflicts, temperature } => {
+                let phase_idx = phase.index();
+                if phase_idx < self.phases.len() {
+                    self.phases[phase_idx].progress = (iteration as f64 / max_iterations as f64) * 100.0;
+                }
+
+                // Update optimization state
+                self.optimization.colors = colors;
+                self.optimization.conflicts = conflicts;
+                self.optimization.iteration = iteration;
+                self.optimization.max_iterations = max_iterations;
+                self.optimization.temperature = temperature;
+            }
+
+            PrismEvent::PhaseCompleted { phase, duration_ms, final_colors, final_conflicts } => {
+                let phase_idx = phase.index();
+                if phase_idx < self.phases.len() {
+                    self.phases[phase_idx].status = PhaseState::Completed;
+                    self.phases[phase_idx].progress = 100.0;
+                    self.phases[phase_idx].time_ms = duration_ms;
+                }
+            }
+
+            PrismEvent::PhaseFailed { phase, error } => {
+                let phase_idx = phase.index();
+                if phase_idx < self.phases.len() {
+                    self.phases[phase_idx].status = PhaseState::Failed;
+                }
+                self.dialogue.add_system_message(&format!("Phase {} failed: {}", phase.name(), error));
+            }
+
+            PrismEvent::NewBestSolution { colors, conflicts, iteration, phase } => {
+                self.optimization.best_colors = colors;
+                self.optimization.best_conflicts = conflicts;
+
+                self.dialogue.add_system_message(&format!(
+                    "New best solution! {} colors, {} conflicts (iteration {}, {})",
+                    colors, conflicts, iteration, phase.name()
+                ));
+            }
+
+            PrismEvent::GpuStatus { device_id, name, utilization, memory_used, memory_total, temperature, power_watts } => {
+                if device_id == self.gpu_device {
+                    self.gpu.name = name;
+                    self.gpu.utilization = utilization;
+                    self.gpu.memory_used = memory_used;
+                    self.gpu.memory_total = memory_total;
+                    self.gpu.temperature = temperature;
+                }
+            }
+
+            PrismEvent::ReplicaUpdate { replica_id, temperature, colors, conflicts, energy } => {
+                // Update replica states for visualization
+                while self.optimization.replicas.len() <= replica_id {
+                    self.optimization.replicas.push(ReplicaState {
+                        temperature: 0.0,
+                        colors: 0,
+                        is_best: false,
+                    });
+                }
+
+                if replica_id < self.optimization.replicas.len() {
+                    self.optimization.replicas[replica_id].temperature = temperature;
+                    self.optimization.replicas[replica_id].colors = colors;
+                    // Mark best replica
+                    self.optimization.replicas[replica_id].is_best =
+                        colors <= self.optimization.best_colors;
+                }
+            }
+
+            PrismEvent::QuantumState { coherence, top_amplitudes, tunneling_rate } => {
+                self.optimization.quantum_coherence = coherence;
+                self.optimization.quantum_amplitudes = top_amplitudes;
+            }
+
+            PrismEvent::DendriticUpdate { active_neurons, total_neurons, firing_rate, pattern_detected } => {
+                self.optimization.dendritic_active_neurons = active_neurons;
+                self.optimization.dendritic_total_neurons = total_neurons;
+                self.optimization.dendritic_firing_rate = firing_rate;
+
+                if let Some(pattern) = pattern_detected {
+                    self.dialogue.add_system_message(&format!("Pattern detected: {}", pattern));
+                }
+            }
+
+            PrismEvent::OptimizationCompleted { total_duration_ms, final_colors, attempts } => {
+                self.dialogue.add_system_message(&format!(
+                    "Optimization complete! Final result: {} colors in {:.2}s ({} attempts)",
+                    final_colors,
+                    total_duration_ms as f64 / 1000.0,
+                    attempts
+                ));
+            }
+
+            PrismEvent::Error { source, message, recoverable } => {
+                self.dialogue.add_system_message(&format!(
+                    "Error in {}: {} ({})",
+                    source,
+                    message,
+                    if recoverable { "recoverable" } else { "fatal" }
+                ));
+            }
+
+            _ => {
+                // Ignore other events
             }
         }
 

@@ -1,10 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    # Main binary - world-class TUI
-    "crates/prism",
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PRISM Unified Entry Point
+    # ═══════════════════════════════════════════════════════════════════════════
+    "crates/prism",  # World-class TUI with AI dialogue interface
 
-    # Core compute crates
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Core Compute Crates
+    # ═══════════════════════════════════════════════════════════════════════════
     "crates/prism-core",
     "crates/prism-gpu",
     "crates/prism-geometry",
@@ -12,21 +16,31 @@ members = [
     "crates/prism-phases",
     "crates/prism-whcr",
     "crates/prism-pipeline",
-    "crates/prism-cli",  # Legacy CLI (deprecated)
 
-    # Specialized compute crates
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Specialized Compute Crates
+    # ═══════════════════════════════════════════════════════════════════════════
     "crates/prism-ontology",
     "crates/prism-mec",
     "crates/prism-physics",
     "crates/prism-gnn",
     "crates/prism-lbs",
 
-    # Foundation crates (production-grade implementations)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Foundation Crates (Production-grade GPU Implementations)
+    # ═══════════════════════════════════════════════════════════════════════════
     "foundation/shared-types",
     "foundation/prct-core",
     "foundation/quantum",
     "foundation/neuromorphic",
 ]
+
+# Default package for `cargo run` - the unified TUI
+default-members = ["crates/prism"]
+
+# prism-cli has been fully deprecated and migrated to crates/prism
+# All config and metrics_server functionality is now in the unified TUI
+exclude = ["crates/prism-cli"]
 
 [workspace.package]
 version = "0.3.0"

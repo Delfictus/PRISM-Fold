@@ -15,10 +15,15 @@ use ratatui::prelude::*;
 use std::io::{self, stdout};
 
 mod ai;
+pub mod config;
+pub mod metrics_server;
+mod runtime;
 mod streaming;
 mod ui;
 mod widgets;
 
+pub use config::PrismConfig;
+pub use runtime::PrismRuntime;
 pub use ui::App;
 
 /// PRISM-Fold version
@@ -249,36 +254,67 @@ fn main() -> Result<()> {
 }
 
 fn run_tui(args: Args) -> Result<()> {
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    // Create async runtime for the PRISM runtime system
+    let rt = tokio::runtime::Runtime::new()?;
 
-    // Extract GPU device ID for TUI
-    let gpu_device = args.gpu_devices.first().copied().unwrap_or(0);
+    rt.block_on(async {
+        // Initialize PRISM runtime
+        let runtime_config = runtime::RuntimeConfig {
+            event_bus_capacity: 1024,
+            ring_buffer_size: 1000,
+            gpu_poll_interval_ms: 100,
+            max_actors: 16,
+        };
 
-    // Create app and run
-    let mut app = App::new(args.input, args.mode, gpu_device)?;
-    let result = app.run(&mut terminal);
+        let mut prism_runtime = PrismRuntime::new(runtime_config)?;
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+        // Start runtime (spawns all actors)
+        prism_runtime.start().await?;
 
-    // Handle any errors from the app
-    if let Err(e) = result {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
+        // Get event receiver for UI updates
+        let event_rx = prism_runtime.subscribe();
 
-    Ok(())
+        // Setup terminal
+        enable_raw_mode()?;
+        let mut stdout = stdout();
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+
+        // Extract GPU device ID for TUI
+        let gpu_device = args.gpu_devices.first().copied().unwrap_or(0);
+
+        // Create app with runtime integration
+        let mut app = App::new_with_runtime(
+            args.input,
+            args.mode,
+            gpu_device,
+            prism_runtime.state.clone(),
+            event_rx,
+        )?;
+
+        let result = app.run(&mut terminal);
+
+        // Restore terminal
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+
+        // Shutdown runtime
+        prism_runtime.shutdown().await?;
+
+        // Handle any errors from the app
+        if let Err(e) = result {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+
+        Ok(())
+    })
 }
 
 fn run_headless(args: Args) -> Result<()> {
@@ -459,7 +495,7 @@ fn run_headless(args: Args) -> Result<()> {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
             rt.block_on(async {
                 if let Err(e) =
-                    prism_cli::metrics_server::start_metrics_server(port, metrics_clone).await
+                    crate::metrics_server::start_metrics_server(port, metrics_clone).await
                 {
                     log::error!("Metrics server failed: {}", e);
                 }
@@ -536,7 +572,7 @@ fn run_headless(args: Args) -> Result<()> {
         log::info!("Loading configuration from: {}", config_path);
 
         // Load and parse config using serde
-        use prism_cli::config::PrismConfig;
+        use crate::config::PrismConfig;
         let prism_config = PrismConfig::from_file(config_path)?;
         prism_config.validate()?;
 
