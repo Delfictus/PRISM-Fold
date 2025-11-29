@@ -257,7 +257,7 @@ fn test_multiple_context_creation() {
 
     std::fs::create_dir_all(&ptx_dir).ok();
 
-    // Create multiple contexts (should work - Arc<CudaDevice> is thread-safe)
+    // Create multiple contexts (should work - Arc<CudaContext> is thread-safe)
     if let Ok(ctx1) = GpuContext::new(0, config.clone(), &ptx_dir) {
         if let Ok(ctx2) = GpuContext::new(0, config, &ptx_dir) {
             println!("Multiple contexts created successfully");

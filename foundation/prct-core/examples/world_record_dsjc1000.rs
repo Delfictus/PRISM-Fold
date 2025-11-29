@@ -17,7 +17,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 
 #[cfg(feature = "cuda")]
 use prct_core::world_record_pipeline::{WorldRecordConfig, WorldRecordPipeline};
@@ -103,7 +103,7 @@ fn main() -> Result<()> {
 
     // Initialize CUDA device
     println!("🚀 Initializing CUDA device...");
-    let cuda_device = CudaDevice::new(0)?;
+    let cuda_device = CudaContext::new(0)?;
     println!("✅ GPU ready (device 0)");
     println!();
 

@@ -33,7 +33,8 @@
 //! REFERENCE: PRISM GPU Plan §4.6 (Phase 6 TDA Kernel)
 
 use anyhow::{bail, Context, Result};
-use cudarc::driver::{CudaDevice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, CudaStream, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// Maximum supported graph size (enforced at runtime)
@@ -49,10 +50,21 @@ const PATH_COMPRESSION_ITERS: usize = 10;
 /// GPU-accelerated TDA persistent homology solver
 ///
 /// Maintains CUDA device context and compiled PTX module.
-/// Thread-safe via Arc<CudaDevice>.
+/// Thread-safe via Arc<CudaContext>.
 pub struct TdaGpu {
     /// CUDA device handle
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    /// CUDA stream for async operations
+    stream: Arc<CudaStream>,
+
+    // Kernel functions
+    union_find_init: CudaFunction,
+    union_find_link: CudaFunction,
+    union_find_compress: CudaFunction,
+    count_components: CudaFunction,
+    compute_degrees: CudaFunction,
+    compute_persistence_scores: CudaFunction,
+    compute_topological_importance: CudaFunction,
 }
 
 impl TdaGpu {
@@ -70,39 +82,59 @@ impl TdaGpu {
     ///
     /// # Example
     /// ```rust,no_run
-    /// use cudarc::driver::CudaDevice;
+    /// use cudarc::driver::CudaContext;
     /// use prism_gpu::tda::TdaGpu;
     /// use std::sync::Arc;
     ///
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let tda = TdaGpu::new(Arc::new(device), "target/ptx/tda.ptx").unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         log::info!("Loading TDA PTX module from: {}", ptx_path);
 
-        // Load PTX module
-        let ptx_str = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read PTX file: {}", ptx_path))?;
+        let stream = device.default_stream();
 
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "tda",
-                &[
-                    "union_find_init",
-                    "union_find_link",
-                    "union_find_compress",
-                    "count_components",
-                    "compute_degrees",
-                    "compute_persistence_scores",
-                    "compute_topological_importance",
-                ],
-            )
-            .context("Failed to load TDA PTX module")?;
+        // Load PTX module
+        let module = device
+            .load_module(Ptx::from_file(ptx_path))
+            .with_context(|| format!("Failed to load PTX module from {}", ptx_path))?;
+
+        // Load all required kernel functions
+        let union_find_init = module
+            .load_function("union_find_init")
+            .context("Failed to load union_find_init function")?;
+        let union_find_link = module
+            .load_function("union_find_link")
+            .context("Failed to load union_find_link function")?;
+        let union_find_compress = module
+            .load_function("union_find_compress")
+            .context("Failed to load union_find_compress function")?;
+        let count_components = module
+            .load_function("count_components")
+            .context("Failed to load count_components function")?;
+        let compute_degrees = module
+            .load_function("compute_degrees")
+            .context("Failed to load compute_degrees function")?;
+        let compute_persistence_scores = module
+            .load_function("compute_persistence_scores")
+            .context("Failed to load compute_persistence_scores function")?;
+        let compute_topological_importance = module
+            .load_function("compute_topological_importance")
+            .context("Failed to load compute_topological_importance function")?;
 
         log::info!("TDA GPU module loaded successfully");
 
-        Ok(Self { device })
+        Ok(Self {
+            context: device,
+            stream,
+            union_find_init,
+            union_find_link,
+            union_find_compress,
+            count_components,
+            compute_degrees,
+            compute_persistence_scores,
+            compute_topological_importance,
+        })
     }
 
     /// Computes Betti numbers (connected components and cycles) on GPU
@@ -126,9 +158,9 @@ impl TdaGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::tda::TdaGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = Arc::new(CudaDevice::new(0).unwrap());
+    /// # let device = Arc::new(CudaContext::new(0).unwrap());
     /// # let tda = TdaGpu::new(device, "target/ptx/tda.ptx").unwrap();
     /// let adjacency = vec![vec![1], vec![0, 2], vec![1]]; // Triangle
     /// let (betti_0, betti_1) = tda.compute_betti_numbers(&adjacency, 3, 3).unwrap();
@@ -173,20 +205,20 @@ impl TdaGpu {
         }
 
         // Allocate device memory
-        let mut d_parent = self
-            .device
+        let d_parent = self
+            .stream
             .alloc_zeros::<i32>(num_vertices)
             .context("Failed to allocate parent array")?;
         let d_edges_u = self
-            .device
-            .htod_sync_copy(&edges_u)
+            .stream
+            .clone_htod(&edges_u)
             .context("Failed to copy edges_u to device")?;
         let d_edges_v = self
-            .device
-            .htod_sync_copy(&edges_v)
+            .stream
+            .clone_htod(&edges_v)
             .context("Failed to copy edges_v to device")?;
-        let mut d_component_count = self
-            .device
+        let d_component_count = self
+            .stream
             .alloc_zeros::<i32>(1)
             .context("Failed to allocate component count")?;
 
@@ -196,11 +228,6 @@ impl TdaGpu {
         let block = (BLOCK_SIZE, 1, 1);
 
         // Kernel 1: Initialize union-find
-        let init_func = self
-            .device
-            .get_func("tda", "union_find_init")
-            .context("Failed to get union_find_init function")?;
-
         let cfg = LaunchConfig {
             grid_dim: grid_vertices,
             block_dim: block,
@@ -208,17 +235,16 @@ impl TdaGpu {
         };
 
         unsafe {
-            // SAFETY: d_parent is valid for num_vertices elements, pointers valid for kernel duration
-            init_func.launch(cfg, (&mut d_parent, num_vertices as i32))
+            // SAFETY: d_parent is valid for num_vertices elements
+            self.stream
+                .launch_builder(&self.union_find_init)
+                .arg(&d_parent)
+                .arg(&(num_vertices as i32))
+                .launch(cfg)
         }
         .context("Failed to launch union_find_init kernel")?;
 
         // Kernel 2: Link edges (union operation)
-        let link_func = self
-            .device
-            .get_func("tda", "union_find_link")
-            .context("Failed to get union_find_link function")?;
-
         let cfg_edges = LaunchConfig {
             grid_dim: grid_edges,
             block_dim: block,
@@ -227,50 +253,49 @@ impl TdaGpu {
 
         unsafe {
             // SAFETY: All pointers valid, sizes checked above
-            link_func.launch(
-                cfg_edges,
-                (&mut d_parent, &d_edges_u, &d_edges_v, actual_edges as i32),
-            )
+            self.stream
+                .launch_builder(&self.union_find_link)
+                .arg(&d_parent)
+                .arg(&d_edges_u)
+                .arg(&d_edges_v)
+                .arg(&(actual_edges as i32))
+                .launch(cfg_edges)
         }
         .context("Failed to launch union_find_link kernel")?;
 
         // Kernel 3: Path compression (iterative for full compression)
         for _ in 0..PATH_COMPRESSION_ITERS {
-            let compress_func = self
-                .device
-                .get_func("tda", "union_find_compress")
-                .context("Failed to get union_find_compress function")?;
-
             unsafe {
                 // SAFETY: d_parent is valid, no data races (idempotent compression)
-                compress_func.launch(cfg, (&mut d_parent, num_vertices as i32))
+                self.stream
+                    .launch_builder(&self.union_find_compress)
+                    .arg(&d_parent)
+                    .arg(&(num_vertices as i32))
+                    .launch(cfg)
             }
             .context("Failed to launch union_find_compress kernel")?;
         }
 
         // Kernel 4: Count components
-        let count_func = self
-            .device
-            .get_func("tda", "count_components")
-            .context("Failed to get count_components function")?;
-
         unsafe {
             // SAFETY: Pointers valid, atomic increments ensure thread safety
-            count_func.launch(
-                cfg,
-                (&d_parent, &mut d_component_count, num_vertices as i32),
-            )
+            self.stream
+                .launch_builder(&self.count_components)
+                .arg(&d_parent)
+                .arg(&d_component_count)
+                .arg(&(num_vertices as i32))
+                .launch(cfg)
         }
         .context("Failed to launch count_components kernel")?;
 
         // Synchronize and copy results back
-        self.device
+        self.stream
             .synchronize()
-            .context("Failed to synchronize device")?;
+            .context("Failed to synchronize stream")?;
 
         let component_count_host = self
-            .device
-            .dtoh_sync_copy(&d_component_count)
+            .stream
+            .clone_dtoh(&d_component_count)
             .context("Failed to copy component count to host")?;
         let betti_0 = component_count_host[0] as usize;
 
@@ -304,9 +329,9 @@ impl TdaGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::tda::TdaGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = Arc::new(CudaDevice::new(0).unwrap());
+    /// # let device = Arc::new(CudaContext::new(0).unwrap());
     /// # let tda = TdaGpu::new(device, "target/ptx/tda.ptx").unwrap();
     /// let adjacency = vec![vec![1, 2], vec![0, 2], vec![0, 1]]; // Triangle
     /// let (betti_0, betti_1) = tda.compute_betti_numbers(&adjacency, 3, 3).unwrap();
@@ -340,28 +365,28 @@ impl TdaGpu {
         }
 
         // Allocate device memory
-        let mut d_degrees = self
-            .device
+        let d_degrees = self
+            .stream
             .alloc_zeros::<i32>(num_vertices)
             .context("Failed to allocate degrees array")?;
-        let mut d_parent = self
-            .device
+        let d_parent = self
+            .stream
             .alloc_zeros::<i32>(num_vertices)
             .context("Failed to allocate parent array")?;
         let d_edges_u = self
-            .device
-            .htod_sync_copy(&edges_u)
+            .stream
+            .clone_htod(&edges_u)
             .context("Failed to copy edges_u to device")?;
         let d_edges_v = self
-            .device
-            .htod_sync_copy(&edges_v)
+            .stream
+            .clone_htod(&edges_v)
             .context("Failed to copy edges_v to device")?;
-        let mut d_persistence = self
-            .device
+        let d_persistence = self
+            .stream
             .alloc_zeros::<f32>(num_vertices)
             .context("Failed to allocate persistence array")?;
-        let mut d_importance = self
-            .device
+        let d_importance = self
+            .stream
             .alloc_zeros::<f32>(num_vertices)
             .context("Failed to allocate importance array")?;
 
@@ -371,11 +396,6 @@ impl TdaGpu {
         let block = (BLOCK_SIZE, 1, 1);
 
         // Kernel 1: Compute degrees
-        let degrees_func = self
-            .device
-            .get_func("tda", "compute_degrees")
-            .context("Failed to get compute_degrees function")?;
-
         let cfg_edges = LaunchConfig {
             grid_dim: grid_edges,
             block_dim: block,
@@ -384,19 +404,17 @@ impl TdaGpu {
 
         unsafe {
             // SAFETY: All pointers valid, atomic adds ensure thread safety
-            degrees_func.launch(
-                cfg_edges,
-                (&d_edges_u, &d_edges_v, &mut d_degrees, actual_edges as i32),
-            )
+            self.stream
+                .launch_builder(&self.compute_degrees)
+                .arg(&d_edges_u)
+                .arg(&d_edges_v)
+                .arg(&d_degrees)
+                .arg(&(actual_edges as i32))
+                .launch(cfg_edges)
         }
         .context("Failed to launch compute_degrees kernel")?;
 
         // Kernel 2: Initialize parent array (for component-aware computation)
-        let init_func = self
-            .device
-            .get_func("tda", "union_find_init")
-            .context("Failed to get union_find_init function")?;
-
         let cfg_vertices = LaunchConfig {
             grid_dim: grid_vertices,
             block_dim: block,
@@ -405,66 +423,56 @@ impl TdaGpu {
 
         unsafe {
             // SAFETY: d_parent is valid for num_vertices elements
-            init_func.launch(cfg_vertices, (&mut d_parent, num_vertices as i32))
+            self.stream
+                .launch_builder(&self.union_find_init)
+                .arg(&d_parent)
+                .arg(&(num_vertices as i32))
+                .launch(cfg_vertices)
         }
         .context("Failed to launch union_find_init kernel")?;
 
         // Kernel 3: Compute persistence scores
-        let persistence_func = self
-            .device
-            .get_func("tda", "compute_persistence_scores")
-            .context("Failed to get compute_persistence_scores function")?;
-
         unsafe {
             // SAFETY: All pointers valid, read-only access to degrees/parent
-            persistence_func.launch(
-                cfg_vertices,
-                (
-                    &d_degrees,
-                    &d_parent,
-                    betti_0 as i32,
-                    betti_1 as i32,
-                    &mut d_persistence,
-                    num_vertices as i32,
-                ),
-            )
+            self.stream
+                .launch_builder(&self.compute_persistence_scores)
+                .arg(&d_degrees)
+                .arg(&d_parent)
+                .arg(&(betti_0 as i32))
+                .arg(&(betti_1 as i32))
+                .arg(&d_persistence)
+                .arg(&(num_vertices as i32))
+                .launch(cfg_vertices)
         }
         .context("Failed to launch compute_persistence_scores kernel")?;
 
         // Kernel 4: Compute topological importance
-        let importance_func = self
-            .device
-            .get_func("tda", "compute_topological_importance")
-            .context("Failed to get compute_topological_importance function")?;
-
         unsafe {
             // SAFETY: All pointers valid, read-only access to most arrays
-            importance_func.launch(
-                cfg_vertices,
-                (
-                    &d_persistence,
-                    &d_degrees,
-                    &d_parent,
-                    betti_0 as i32,
-                    &mut d_importance,
-                    num_vertices as i32,
-                ),
-            )
+            self.stream
+                .launch_builder(&self.compute_topological_importance)
+                .arg(&d_persistence)
+                .arg(&d_degrees)
+                .arg(&d_parent)
+                .arg(&(betti_0 as i32))
+                .arg(&d_importance)
+                .arg(&(num_vertices as i32))
+                .launch(cfg_vertices)
         }
         .context("Failed to launch compute_topological_importance kernel")?;
 
         // Synchronize and copy results back
-        self.device
+        self.stream
             .synchronize()
-            .context("Failed to synchronize device")?;
+            .context("Failed to synchronize stream")?;
 
         let persistence = self
-            .device
-            .dtoh_sync_copy(&d_persistence)
+            .stream
+            .clone_dtoh(&d_persistence)
             .context("Failed to copy persistence to host")?;
         let importance = self
-            .device
-            .dtoh_sync_copy(&d_importance)
+            .stream
+            .clone_dtoh(&d_importance)
             .context("Failed to copy importance to host")?;
 
         Ok((persistence, importance))
@@ -498,7 +506,7 @@ mod tests {
 
     /// Helper: Create GPU context for tests
     fn create_test_gpu() -> Result<TdaGpu> {
-        let device = CudaDevice::new(0)?;
+        let device = CudaContext::new(0)?;
         TdaGpu::new(Arc::new(device), "target/ptx/tda.ptx")
     }
 

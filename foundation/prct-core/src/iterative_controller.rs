@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 
 /// Configuration for iterative refinement
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -111,7 +111,7 @@ pub fn run_iterative_pipeline(
 
         // Create pipeline for this pass with escalated config
         #[cfg(feature = "cuda")]
-        let cuda_device = CudaDevice::new(escalated_config.gpu.device_id)
+        let cuda_device = CudaContext::new(escalated_config.gpu.device_id)
             .map_err(|e| PRCTError::GpuError(format!("Failed to init CUDA device: {}", e)))?;
 
         #[cfg(feature = "cuda")]

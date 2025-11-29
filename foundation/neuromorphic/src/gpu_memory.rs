@@ -11,13 +11,12 @@ use std::sync::{Arc, Mutex};
 /// GPU memory pool for efficient buffer reuse
 /// Eliminates allocation overhead that would reduce the 89% performance gain
 pub struct GpuMemoryPool {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
     pools: DashMap<usize, Vec<CudaSlice<f32>>>,
     allocation_stats: Arc<Mutex<AllocationStats>>,
     _max_pool_size: usize,
     _total_allocated_bytes: Arc<Mutex<usize>>,
-    // Note: cudarc 0.9 doesn't have separate streams like 0.17
-    // Operations are synchronous on the device
 }
 
 /// Memory allocation statistics for monitoring
@@ -70,11 +69,13 @@ impl Default for GpuMemoryConfig {
 
 impl GpuMemoryPool {
     /// Create new GPU memory pool optimized for RTX 5070
-    pub fn new(device: Arc<CudaDevice>, config: GpuMemoryConfig) -> Result<Self> {
-        // cudarc 0.9: synchronous operations on device
+    pub fn new(context: Arc<CudaContext>, config: GpuMemoryConfig) -> Result<Self> {
+        // cudarc 0.18.1: create default stream (wrapped in Arc)
+        let stream = Arc::new(context.default_stream());
 
         let pool = Self {
-            device: device.clone(),
+            context: context.clone(),
+            stream,
             pools: DashMap::new(),
             allocation_stats: Arc::new(Mutex::new(AllocationStats::default())),
             _max_pool_size: config.max_cache_size_mb * 1024 * 1024 / 4, // Convert MB to f32 count
@@ -93,9 +94,9 @@ impl GpuMemoryPool {
         for &size in sizes {
             let mut buffers = Vec::new();
 
-            // Pre-allocate 4 buffers of each size
+            // Pre-allocate 4 buffers of each size (cudarc 0.18.1: use stream)
             for _ in 0..4 {
-                let buffer = self.device.alloc_zeros::<f32>(size)?;
+                let buffer = self.stream.alloc_zeros::<f32>(size)?;
                 buffers.push(buffer);
             }
 
@@ -136,16 +137,16 @@ impl GpuMemoryPool {
             }
         }
 
-        // Cache miss - allocate new buffer
+        // Cache miss - allocate new buffer (cudarc 0.18.1: use stream)
         let buffer = match buffer_type {
-            BufferType::Matrix | BufferType::Vector => self.device.alloc_zeros::<f32>(size)?,
+            BufferType::Matrix | BufferType::Vector => self.stream.alloc_zeros::<f32>(size)?,
             BufferType::Input => {
                 // Input buffers might benefit from pinned memory
-                self.device.alloc_zeros::<f32>(size)?
+                self.stream.alloc_zeros::<f32>(size)?
             }
             BufferType::Temporary => {
                 // Temporary buffers for intermediate computation
-                self.device.alloc_zeros::<f32>(size)?
+                self.stream.alloc_zeros::<f32>(size)?
             }
         };
 
@@ -173,9 +174,9 @@ impl GpuMemoryPool {
 
         if current_pool_size < 8 {
             // Max 8 buffers per size in pool
-            // Clear buffer memory for reuse (need mutable reference)
+            // Clear buffer memory for reuse (cudarc 0.18.1: use stream)
             let mut buffer_mut = buffer;
-            self.device
+            self.stream
                 .memset_zeros(&mut buffer_mut)
                 .map_err(|e| anyhow!("Failed to clear buffer: {}", e))?;
 
@@ -220,9 +221,9 @@ impl GpuMemoryPool {
         &self,
         host_data: &[T],
     ) -> Result<CudaSlice<T>> {
-        // cudarc 0.9 API: use htod_sync_copy on device
-        self.device
-            .htod_sync_copy(host_data)
+        // cudarc 0.18.1 API: use clone_htod on stream
+        self.stream
+            .clone_htod(host_data)
             .map_err(|e| anyhow!("Failed to copy host to device: {}", e))
     }
 
@@ -231,23 +232,28 @@ impl GpuMemoryPool {
         &self,
         device_buffer: &CudaSlice<T>,
     ) -> Result<Vec<T>> {
-        // cudarc 0.9 API: use dtoh_sync_copy on device
-        self.device
-            .dtoh_sync_copy(device_buffer)
+        // cudarc 0.18.1 API: use clone_dtoh on stream
+        self.stream
+            .clone_dtoh(device_buffer)
             .map_err(|e| anyhow!("Failed to copy device to host: {}", e))
     }
 
     /// Synchronize transfer operations
     pub fn sync_transfers(&self) -> Result<()> {
-        // cudarc 0.9 API: synchronize device
-        self.device
+        // cudarc 0.18.1 API: synchronize stream
+        self.stream
             .synchronize()
             .map_err(|e| anyhow!("Failed to synchronize: {}", e))
     }
 
-    /// Get device reference
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get context reference
+    pub fn context(&self) -> &Arc<CudaContext> {
+        &self.context
+    }
+
+    /// Get stream reference
+    pub fn stream(&self) -> &Arc<CudaStream> {
+        &self.stream
     }
 }
 
@@ -381,7 +387,7 @@ impl Drop for ManagedGpuBuffer {
 /// High-level GPU memory manager for neuromorphic-quantum platform
 pub struct NeuromorphicGpuMemoryManager {
     memory_pool: Arc<GpuMemoryPool>,
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
     // Pre-allocated buffers for common operations
     reservoir_weight_buffer: Option<ManagedGpuBuffer>,
@@ -391,9 +397,9 @@ pub struct NeuromorphicGpuMemoryManager {
 
 impl NeuromorphicGpuMemoryManager {
     /// Create memory manager for neuromorphic processing
-    pub fn new(device: Arc<CudaDevice>, reservoir_size: usize, input_size: usize) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, reservoir_size: usize, input_size: usize) -> Result<Self> {
         let config = GpuMemoryConfig::default();
-        let memory_pool = Arc::new(GpuMemoryPool::new(device.clone(), config)?);
+        let memory_pool = Arc::new(GpuMemoryPool::new(context.clone(), config)?);
 
         // Pre-allocate buffers for neuromorphic operations
         let reservoir_matrix_size = reservoir_size * reservoir_size;
@@ -425,7 +431,7 @@ impl NeuromorphicGpuMemoryManager {
 
         Ok(Self {
             memory_pool,
-            device,
+            context,
             reservoir_weight_buffer,
             input_weight_buffer,
             state_buffers,
@@ -466,9 +472,9 @@ impl NeuromorphicGpuMemoryManager {
         self.memory_pool.get_stats()
     }
 
-    /// Get device reference
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get context reference
+    pub fn context(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Clear memory cache to free GPU memory
@@ -484,11 +490,11 @@ mod tests {
     #[test]
     #[ignore] // Requires CUDA-capable GPU
     fn test_memory_pool_creation() {
-        if let Ok(device) = CudaDevice::new(0) {
-            // cudarc 0.9: CudaDevice::new() returns Arc<CudaDevice> directly
+        if let Ok(context) = CudaContext::new(0) {
+            // cudarc 0.18.1: CudaContext::new() returns Arc<CudaContext>
             let config = GpuMemoryConfig::default();
 
-            let pool = GpuMemoryPool::new(device, config);
+            let pool = GpuMemoryPool::new(context, config);
             assert!(pool.is_ok());
 
             let pool = pool.unwrap();
@@ -508,10 +514,10 @@ mod tests {
     #[test]
     #[ignore] // Requires CUDA-capable GPU
     fn test_buffer_reuse() {
-        if let Ok(device) = CudaDevice::new(0) {
-            // cudarc 0.9: CudaDevice::new() returns Arc<CudaDevice> directly
+        if let Ok(context) = CudaContext::new(0) {
+            // cudarc 0.18.1: CudaContext::new() returns Arc<CudaContext>
             let config = GpuMemoryConfig::default();
-            let pool = Arc::new(GpuMemoryPool::new(device, config).unwrap());
+            let pool = Arc::new(GpuMemoryPool::new(context, config).unwrap());
 
             // Get buffer
             let buffer1 = pool.get_buffer(1000, BufferType::Vector).unwrap();
@@ -537,9 +543,9 @@ mod tests {
     #[test]
     #[ignore] // Requires CUDA-capable GPU
     fn test_neuromorphic_memory_manager() {
-        if let Ok(device) = CudaDevice::new(0) {
-            // cudarc 0.9: CudaDevice::new() returns Arc<CudaDevice> directly
-            let manager = NeuromorphicGpuMemoryManager::new(device, 1000, 100);
+        if let Ok(context) = CudaContext::new(0) {
+            // cudarc 0.18.1: CudaContext::new() returns Arc<CudaContext>
+            let manager = NeuromorphicGpuMemoryManager::new(context, 1000, 100);
             assert!(manager.is_ok());
 
             let mut manager = manager.unwrap();

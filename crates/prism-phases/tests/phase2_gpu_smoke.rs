@@ -4,7 +4,7 @@
 
 #[cfg(all(test, feature = "cuda"))]
 mod gpu_tests {
-    use cudarc::driver::CudaDevice;
+    use cudarc::driver::CudaContext;
     use prism_core::{Graph, PhaseContext, PhaseController};
     use prism_phases::Phase2Thermodynamic;
     use std::sync::Arc;
@@ -46,7 +46,7 @@ mod gpu_tests {
     fn test_phase2_gpu_initialization() {
         env_logger::try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
 
         // Try to initialize Phase 2 with GPU
         let result =
@@ -65,7 +65,7 @@ mod gpu_tests {
     fn test_phase2_gpu_triangle() {
         env_logger::try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let mut phase2 =
             Phase2Thermodynamic::new_with_gpu(Arc::new(device), "target/ptx/thermodynamic.ptx")
                 .expect("GPU init failed");
@@ -103,7 +103,7 @@ mod gpu_tests {
     fn test_phase2_gpu_petersen() {
         env_logger::try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let mut phase2 =
             Phase2Thermodynamic::new_with_gpu(Arc::new(device), "target/ptx/thermodynamic.ptx")
                 .expect("GPU init failed");
@@ -143,7 +143,7 @@ mod gpu_tests {
     fn test_phase2_gpu_with_warmstart() {
         env_logger::try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let mut phase2 =
             Phase2Thermodynamic::new_with_gpu(Arc::new(device), "target/ptx/thermodynamic.ptx")
                 .expect("GPU init failed");
@@ -198,7 +198,7 @@ mod gpu_tests {
     fn test_phase2_gpu_rl_action_application() {
         env_logger::try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let mut phase2 =
             Phase2Thermodynamic::new_with_gpu(Arc::new(device), "target/ptx/thermodynamic.ptx")
                 .expect("GPU init failed");

@@ -4,7 +4,7 @@
 //! Accelerates adjacency matrix construction, conflict detection, and DSATUR heuristic.
 
 use anyhow::{anyhow, Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
 use ndarray::Array2;
 use num_complex::Complex64;
@@ -13,8 +13,10 @@ use std::sync::Arc;
 
 /// GPU-accelerated chromatic coloring
 pub struct GpuChromaticColoring {
-    /// CUDA device
-    device: Arc<CudaDevice>,
+    /// CUDA context
+    context: Arc<CudaContext>,
+    /// CUDA stream
+    stream: Arc<CudaStream>,
     /// Number of colors used
     num_colors: usize,
     /// Color assignment (CPU)
@@ -30,11 +32,12 @@ pub struct GpuChromaticColoring {
 impl GpuChromaticColoring {
     /// Create new GPU-accelerated chromatic coloring
     pub fn new_adaptive(coupling_matrix: &Array2<Complex64>, target_colors: usize) -> Result<Self> {
-        let device = CudaDevice::new(0).context("Failed to initialize CUDA device")?;
+        let context = CudaContext::new(0).context("Failed to initialize CUDA device")?;
+        let stream = context.default_stream();
 
-        let threshold = Self::find_optimal_threshold_gpu(&device, coupling_matrix, target_colors)?;
+        let threshold = Self::find_optimal_threshold_gpu(&context, &stream, coupling_matrix, target_colors)?;
 
-        Self::new(coupling_matrix, target_colors, threshold, device)
+        Self::new(coupling_matrix, target_colors, threshold, context, stream)
     }
 
     /// Create with explicit threshold
@@ -42,7 +45,8 @@ impl GpuChromaticColoring {
         coupling_matrix: &Array2<Complex64>,
         target_colors: usize,
         threshold: f64,
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
+        stream: Arc<CudaStream>,
     ) -> Result<Self> {
         let n = coupling_matrix.nrows();
 
@@ -54,13 +58,14 @@ impl GpuChromaticColoring {
         }
 
         // Build adjacency matrix on GPU
-        let gpu_adjacency = Self::build_adjacency_gpu(&device, coupling_matrix, threshold)?;
+        let gpu_adjacency = Self::build_adjacency_gpu(&context, &stream, coupling_matrix, threshold)?;
 
         // Compute coloring using Jones-Plassmann parallel algorithm on GPU
-        let coloring = Self::jones_plassmann_gpu(&device, &gpu_adjacency, n, target_colors)?;
+        let coloring = Self::jones_plassmann_gpu(&context, &stream, &gpu_adjacency, n, target_colors)?;
 
         let mut instance = Self {
-            device,
+            context: context.clone(),
+            stream,
             num_colors: target_colors,
             coloring,
             gpu_adjacency,
@@ -77,7 +82,8 @@ impl GpuChromaticColoring {
     /// Build adjacency matrix on GPU (parallel)
     /// PRODUCTION-GRADE: Comprehensive error handling and validation
     fn build_adjacency_gpu(
-        device: &Arc<CudaDevice>,
+        context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
         coupling_matrix: &Array2<Complex64>,
         threshold: f64,
     ) -> Result<CudaSlice<u8>> {
@@ -116,17 +122,14 @@ impl GpuChromaticColoring {
             }
         }
 
-        // Upload coupling matrix to GPU using cudarc 0.9 API
-        let mut gpu_coupling = device
-            .alloc_zeros::<f32>(coupling_flat.len())
-            .context("Failed to allocate GPU coupling matrix")?;
-        device
-            .htod_sync_copy_into(&coupling_flat, &mut gpu_coupling)
+        // Upload coupling matrix to GPU using stream-based API
+        let gpu_coupling = stream
+            .clone_htod(&coupling_flat)
             .context("Failed to upload coupling matrix to GPU")?;
 
         // Allocate adjacency matrix on GPU (packed as bits in u8 for efficiency)
         let adjacency_bytes = (n * n).div_ceil(8);
-        let mut gpu_adjacency = device
+        let mut gpu_adjacency = stream
             .alloc_zeros::<u8>(adjacency_bytes)
             .context("Failed to allocate GPU adjacency matrix")?;
 
@@ -165,14 +168,14 @@ impl GpuChromaticColoring {
             ));
         }
 
-        // Load PTX module using cudarc 0.9 API
+        // Load PTX module and get kernel
         let ptx_parsed = Ptx::from_src(&ptx);
-        device
-            .load_ptx(ptx_parsed, "graph_coloring", &["build_adjacency"])
+        let module = context
+            .load_module(ptx_parsed)
             .context("Failed to load graph_coloring PTX module - check PTX and CUDA driver")?;
 
-        let build_adjacency = device
-            .get_func("graph_coloring", "build_adjacency")
+        let build_adjacency = module
+            .load_function("build_adjacency")
             .context("Failed to get build_adjacency kernel function")?;
 
         let cfg = LaunchConfig::for_num_elems((n * n) as u32);
@@ -180,17 +183,19 @@ impl GpuChromaticColoring {
         let threshold_f32 = threshold as f32;
         let n_u32 = n as u32;
 
-        // Launch kernel using cudarc 0.9 API
+        // Launch kernel using stream
         unsafe {
-            build_adjacency
-                .launch(
-                    cfg,
-                    (&gpu_coupling, threshold_f32, &mut gpu_adjacency, n_u32),
-                )
+            stream
+                .launch_builder(&build_adjacency)
+                .arg(&gpu_coupling)
+                .arg(&threshold_f32)
+                .arg(&mut gpu_adjacency)
+                .arg(&n_u32)
+                .launch(cfg)
                 .context("GPU kernel launch failed - check CUDA runtime")?;
         }
 
-        device
+        context
             .synchronize()
             .context("GPU synchronization failed after adjacency construction")?;
 
@@ -200,15 +205,15 @@ impl GpuChromaticColoring {
     /// Download adjacency matrix from GPU to CPU
     /// PRODUCTION-GRADE: Validation and symmetry enforcement
     fn download_adjacency(
-        device: &Arc<CudaDevice>,
+        _context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
         gpu_adjacency: &CudaSlice<u8>,
         n: usize,
     ) -> Result<Array2<bool>> {
         let adjacency_bytes = (n * n).div_ceil(8);
 
-        let mut packed = vec![0u8; adjacency_bytes];
-        device
-            .dtoh_sync_copy_into(gpu_adjacency, &mut packed)
+        let packed = stream
+            .clone_dtoh(gpu_adjacency)
             .context("Failed to download adjacency matrix from GPU")?;
 
         if packed.len() != adjacency_bytes {
@@ -269,7 +274,8 @@ impl GpuChromaticColoring {
     ///
     /// Iteratively finds independent sets and colors them in parallel
     fn jones_plassmann_gpu(
-        device: &Arc<CudaDevice>,
+        context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
         gpu_adjacency: &CudaSlice<u8>,
         n: usize,
         max_colors: usize,
@@ -296,34 +302,22 @@ impl GpuChromaticColoring {
                 .map_err(|e| anyhow!("Failed to load parallel_coloring PTX from {:?}: {}. Run: cargo build --release", runtime_path, e))?
         };
 
-        // Load PTX module using cudarc 0.9 API
+        // Load PTX module using cudarc 0.18.1 API
         let ptx_parsed = Ptx::from_src(&ptx);
-        device
-            .load_ptx(
-                ptx_parsed,
-                "parallel_coloring",
-                &[
-                    "init_priorities",
-                    "find_independent_set",
-                    "color_independent_set",
-                    "count_uncolored",
-                ],
-            )
+        let module = context
+            .load_module(ptx_parsed)
             .context("Failed to load parallel coloring PTX module")?;
 
         // Allocate GPU buffers
-        let mut gpu_priorities = device
+        let mut gpu_priorities = stream
             .alloc_zeros::<f32>(n)
             .context("Failed to allocate priorities buffer")?;
-        let mut gpu_colors = device
+        let mut gpu_colors = stream
             .alloc_zeros::<u32>(n)
             .context("Failed to allocate colors buffer")?;
-        let mut gpu_can_color = device
+        let mut gpu_can_color = stream
             .alloc_zeros::<u32>(n)
             .context("Failed to allocate can_color buffer")?;
-        let mut gpu_uncolored_count = device
-            .alloc_zeros::<u32>(1)
-            .context("Failed to allocate uncolored_count buffer")?;
 
         let cfg = LaunchConfig::for_num_elems(n as u32);
         let seed = std::time::SystemTime::now()
@@ -332,36 +326,35 @@ impl GpuChromaticColoring {
             .as_secs();
 
         // Initialize priorities and colors
-        let init_priorities = device
-            .get_func("parallel_coloring", "init_priorities")
+        let init_priorities = module
+            .load_function("init_priorities")
             .context("Failed to get init_priorities kernel")?;
 
         let n_u32 = n as u32;
         let seed_u64 = seed;
 
         unsafe {
-            init_priorities
-                .launch(cfg, (&mut gpu_priorities, &mut gpu_colors, n_u32, seed_u64))
+            stream
+                .launch_builder(&init_priorities)
+                .arg(&mut gpu_priorities)
+                .arg(&mut gpu_colors)
+                .arg(&n_u32)
+                .arg(&seed_u64)
+                .launch(cfg)
                 .context("Failed to launch init_priorities kernel")?;
         }
-        device.synchronize()?;
+        context.synchronize()?;
 
-        // Load kernel functions once before loop (wrap in Arc for reuse)
-        let find_independent_set = Arc::new(
-            device
-                .get_func("parallel_coloring", "find_independent_set")
-                .context("Failed to get find_independent_set kernel")?,
-        );
-        let color_independent_set = Arc::new(
-            device
-                .get_func("parallel_coloring", "color_independent_set")
-                .context("Failed to get color_independent_set kernel")?,
-        );
-        let count_uncolored = Arc::new(
-            device
-                .get_func("parallel_coloring", "count_uncolored")
-                .context("Failed to get count_uncolored kernel")?,
-        );
+        // Load kernel functions once before loop
+        let find_independent_set = module
+            .load_function("find_independent_set")
+            .context("Failed to get find_independent_set kernel")?;
+        let color_independent_set = module
+            .load_function("color_independent_set")
+            .context("Failed to get color_independent_set kernel")?;
+        let count_uncolored = module
+            .load_function("count_uncolored")
+            .context("Failed to get count_uncolored kernel")?;
 
         // Jones-Plassmann algorithm: iteratively color independent sets
         let max_iterations = n; // At most n iterations needed
@@ -370,21 +363,17 @@ impl GpuChromaticColoring {
             let n_u32 = n as u32;
 
             unsafe {
-                (*find_independent_set)
-                    .clone()
-                    .launch(
-                        cfg,
-                        (
-                            gpu_adjacency,
-                            &gpu_priorities,
-                            &gpu_colors,
-                            &mut gpu_can_color,
-                            n_u32,
-                        ),
-                    )
+                stream
+                    .launch_builder(&find_independent_set)
+                    .arg(gpu_adjacency)
+                    .arg(&gpu_priorities)
+                    .arg(&gpu_colors)
+                    .arg(&mut gpu_can_color)
+                    .arg(&n_u32)
+                    .launch(cfg)
                     .context("Failed to launch find_independent_set kernel")?;
             }
-            device.synchronize()?;
+            context.synchronize()?;
 
             // Color the independent set with smallest available colors
             // Need shared memory for used_colors bit vector: (max_colors + 31) / 32 * 4 bytes
@@ -398,46 +387,45 @@ impl GpuChromaticColoring {
             let max_colors_u32 = max_colors as u32;
 
             unsafe {
-                (*color_independent_set)
-                    .clone()
-                    .launch(
-                        cfg_with_shared,
-                        (
-                            gpu_adjacency,
-                            &gpu_can_color,
-                            &mut gpu_colors,
-                            n_u32,
-                            max_colors_u32,
-                        ),
-                    )
+                stream
+                    .launch_builder(&color_independent_set)
+                    .arg(gpu_adjacency)
+                    .arg(&gpu_can_color)
+                    .arg(&mut gpu_colors)
+                    .arg(&n_u32)
+                    .arg(&max_colors_u32)
+                    .launch(cfg_with_shared)
                     .context("Failed to launch color_independent_set kernel")?;
             }
-            device.synchronize()?;
+            context.synchronize()?;
 
             // Count how many vertices are still uncolored
-            let zero = 0u32;
-            device.htod_sync_copy_into(&[zero], &mut gpu_uncolored_count)?;
+            // Allocate fresh zero buffer each iteration
+            let mut gpu_uncolored_count_iter = stream.alloc_zeros::<u32>(1)?;
 
             unsafe {
-                (*count_uncolored)
-                    .clone()
-                    .launch(cfg, (&gpu_colors, &mut gpu_uncolored_count, n_u32))
+                stream
+                    .launch_builder(&count_uncolored)
+                    .arg(&gpu_colors)
+                    .arg(&mut gpu_uncolored_count_iter)
+                    .arg(&n_u32)
+                    .launch(cfg)
                     .context("Failed to launch count_uncolored kernel")?;
             }
-            device.synchronize()?;
+            context.synchronize()?;
 
             // Check if done
-            let mut uncolored_count = vec![0u32; 1];
-            device.dtoh_sync_copy_into(&gpu_uncolored_count, &mut uncolored_count)?;
+            let uncolored_count = stream
+                .clone_dtoh(&gpu_uncolored_count_iter)
+                .context("Failed to download uncolored count")?;
             if uncolored_count[0] == 0 {
                 break; // All vertices colored
             }
         }
 
         // Download coloring from GPU
-        let mut gpu_coloring = vec![0u32; n];
-        device
-            .dtoh_sync_copy_into(&gpu_colors, &mut gpu_coloring)
+        let gpu_coloring = stream
+            .clone_dtoh(&gpu_colors)
             .context("Failed to download coloring from GPU")?;
 
         // Convert to usize and validate
@@ -618,12 +606,10 @@ impl GpuChromaticColoring {
 
         // Upload coloring to GPU
         let coloring_u32: Vec<u32> = self.coloring.iter().map(|&c| c as u32).collect();
-        let mut gpu_coloring = self.device.alloc_zeros::<u32>(n)?;
-        self.device
-            .htod_sync_copy_into(&coloring_u32, &mut gpu_coloring)?;
+        let gpu_coloring = self.stream.clone_htod(&coloring_u32)?;
 
         // Allocate output buffer for conflicts
-        let mut gpu_conflicts = self.device.alloc_zeros::<u32>(1)?;
+        let mut gpu_conflicts = self.stream.alloc_zeros::<u32>(1)?;
 
         // Load PTX module for count_conflicts kernel
         let ptx = if let Ok(out_dir) = std::env::var("OUT_DIR") {
@@ -643,42 +629,38 @@ impl GpuChromaticColoring {
         };
 
         let ptx_parsed = Ptx::from_src(&ptx);
-        self.device
-            .load_ptx(ptx_parsed, "graph_coloring_conflicts", &["count_conflicts"])
+        let module = self.context
+            .load_module(ptx_parsed)
             .context("Failed to load graph_coloring PTX for count_conflicts")?;
 
-        let count_conflicts = self
-            .device
-            .get_func("graph_coloring_conflicts", "count_conflicts")
+        let count_conflicts = module
+            .load_function("count_conflicts")
             .context("Failed to get count_conflicts kernel")?;
 
         let cfg = LaunchConfig::for_num_elems((n * n) as u32);
         let n_u32 = n as u32;
 
         unsafe {
-            count_conflicts.launch(
-                cfg,
-                (
-                    &self.gpu_adjacency,
-                    &gpu_coloring,
-                    &mut gpu_conflicts,
-                    n_u32,
-                ),
-            )?;
+            self.stream
+                .launch_builder(&count_conflicts)
+                .arg(&self.gpu_adjacency)
+                .arg(&gpu_coloring)
+                .arg(&mut gpu_conflicts)
+                .arg(&n_u32)
+                .launch(cfg)?;
         }
 
-        self.device.synchronize()?;
+        self.context.synchronize()?;
 
         // Download result
-        let mut conflicts = vec![0u32; 1];
-        self.device
-            .dtoh_sync_copy_into(&gpu_conflicts, &mut conflicts)?;
+        let conflicts = self.stream.clone_dtoh(&gpu_conflicts)?;
         Ok(conflicts[0] as usize)
     }
 
     /// Find optimal threshold using GPU-accelerated binary search
     fn find_optimal_threshold_gpu(
-        device: &Arc<CudaDevice>,
+        context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
         coupling_matrix: &Array2<Complex64>,
         target_colors: usize,
     ) -> Result<f64> {
@@ -717,8 +699,8 @@ impl GpuChromaticColoring {
             let mid_threshold = strengths[mid_idx];
 
             // Build graph with this threshold (on GPU)
-            let gpu_adjacency = Self::build_adjacency_gpu(device, coupling_matrix, mid_threshold)?;
-            let cpu_adjacency = Self::download_adjacency(device, &gpu_adjacency, n)?;
+            let gpu_adjacency = Self::build_adjacency_gpu(context, stream, coupling_matrix, mid_threshold)?;
+            let cpu_adjacency = Self::download_adjacency(context, stream, &gpu_adjacency, n)?;
 
             // Test k-colorability
             if let Ok(_coloring) = Self::greedy_coloring_cpu(&cpu_adjacency, target_colors) {
@@ -763,7 +745,7 @@ mod tests {
     #[test]
     fn test_gpu_coloring_basic() {
         // Skip if no GPU available
-        if CudaDevice::new(0).is_err() {
+        if CudaContext::new(0).is_err() {
             return;
         }
 

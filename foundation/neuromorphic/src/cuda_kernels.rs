@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 /// CUDA kernel definitions for neuromorphic operations
 pub struct NeuromorphicKernels {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
 
     // Compiled kernel functions
     leaky_integration_kernel: Arc<CudaFunction>,
@@ -39,15 +40,19 @@ impl Default for KernelConfig {
 
 impl NeuromorphicKernels {
     /// Initialize CUDA kernels optimized for RTX 5070
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>) -> Result<Self> {
+        // Create default stream (cudarc 0.18.1) - wrapped in Arc
+        let stream = Arc::new(context.default_stream());
+
         // Compile all kernels
-        let leaky_integration_kernel = Self::compile_leaky_integration_kernel(&device)?;
-        let spike_encoding_kernel = Self::compile_spike_encoding_kernel(&device)?;
-        let pattern_detection_kernel = Self::compile_pattern_detection_kernel(&device)?;
-        let spectral_radius_kernel = Self::compile_spectral_radius_kernel(&device)?;
+        let leaky_integration_kernel = Self::compile_leaky_integration_kernel(&context)?;
+        let spike_encoding_kernel = Self::compile_spike_encoding_kernel(&context)?;
+        let pattern_detection_kernel = Self::compile_pattern_detection_kernel(&context)?;
+        let spectral_radius_kernel = Self::compile_spectral_radius_kernel(&context)?;
 
         Ok(Self {
-            device,
+            context,
+            stream,
             leaky_integration_kernel,
             spike_encoding_kernel,
             pattern_detection_kernel,
@@ -59,7 +64,7 @@ impl NeuromorphicKernels {
     ///
     /// This kernel implements: x(t) = (1-α)x(t-1) + α*tanh(W_in*u + W*x)
     /// Optimized for 1000+ neuron reservoirs on RTX 5070
-    fn compile_leaky_integration_kernel(device: &Arc<CudaDevice>) -> Result<Arc<CudaFunction>> {
+    fn compile_leaky_integration_kernel(context: &Arc<CudaContext>) -> Result<Arc<CudaFunction>> {
         let kernel_source = r#"
 #include <curand_kernel.h>
 
@@ -103,25 +108,25 @@ extern "C" __global__ void leaky_integration_kernel(
 }
         "#;
 
-        // Compile CUDA source to PTX using NVRTC (cudarc 0.9)
+        // Compile CUDA source to PTX using NVRTC (cudarc 0.18.1)
         let ptx = cudarc::nvrtc::compile_ptx(kernel_source)
             .map_err(|e| anyhow::anyhow!("Failed to compile leaky integration kernel: {}", e))?;
 
-        // Load PTX module and get function (cudarc 0.9 API)
-        device
-            .load_ptx(ptx, "leaky_integration", &["leaky_integration_kernel"])
+        // Load PTX module and get function (cudarc 0.18.1 API: load_module takes only ptx)
+        let module = context
+            .load_module(ptx)
             .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {}", e))?;
 
-        // Get the function from the device
-        let function = device
-            .get_func("leaky_integration", "leaky_integration_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to load kernel function"))?;
+        // Get the function from the module
+        let function = module
+            .load_function("leaky_integration_kernel")
+            .map_err(|e| anyhow::anyhow!("Failed to load kernel function: {}", e))?;
 
         Ok(Arc::new(function))
     }
 
     /// Compile spike encoding kernel for input preprocessing
-    fn compile_spike_encoding_kernel(device: &Arc<CudaDevice>) -> Result<Arc<CudaFunction>> {
+    fn compile_spike_encoding_kernel(context: &Arc<CudaContext>) -> Result<Arc<CudaFunction>> {
         let kernel_source = r#"
 extern "C" __global__ void spike_encoding_kernel(
     float* output_vector,        // Output: encoded spike pattern
@@ -155,24 +160,24 @@ extern "C" __global__ void spike_encoding_kernel(
 }
         "#;
 
-        // Compile CUDA source to PTX using NVRTC (cudarc 0.9)
+        // Compile CUDA source to PTX using NVRTC (cudarc 0.18.1)
         let ptx = cudarc::nvrtc::compile_ptx(kernel_source)
             .map_err(|e| anyhow::anyhow!("Failed to compile spike encoding kernel: {}", e))?;
 
-        // Load PTX module and get function (cudarc 0.9 API)
-        device
-            .load_ptx(ptx, "spike_encoding", &["spike_encoding_kernel"])
+        // Load PTX module and get function (cudarc 0.18.1 API: load_module takes only ptx)
+        let module = context
+            .load_module(ptx)
             .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {}", e))?;
 
-        let function = device
-            .get_func("spike_encoding", "spike_encoding_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to load kernel function"))?;
+        let function = module
+            .load_function("spike_encoding_kernel")
+            .map_err(|e| anyhow::anyhow!("Failed to load kernel function: {}", e))?;
 
         Ok(Arc::new(function))
     }
 
     /// Compile pattern detection kernel for neuromorphic pattern recognition
-    fn compile_pattern_detection_kernel(device: &Arc<CudaDevice>) -> Result<Arc<CudaFunction>> {
+    fn compile_pattern_detection_kernel(context: &Arc<CudaContext>) -> Result<Arc<CudaFunction>> {
         let kernel_source = r#"
 extern "C" __global__ void pattern_detection_kernel(
     float* pattern_scores,       // Output: pattern detection scores
@@ -217,24 +222,24 @@ extern "C" __global__ void pattern_detection_kernel(
 }
         "#;
 
-        // Compile CUDA source to PTX using NVRTC (cudarc 0.9)
+        // Compile CUDA source to PTX using NVRTC (cudarc 0.18.1)
         let ptx = cudarc::nvrtc::compile_ptx(kernel_source)
             .map_err(|e| anyhow::anyhow!("Failed to compile pattern detection kernel: {}", e))?;
 
-        // Load PTX module and get function (cudarc 0.9 API)
-        device
-            .load_ptx(ptx, "pattern_detection", &["pattern_detection_kernel"])
+        // Load PTX module and get function (cudarc 0.18.1 API: load_module takes only ptx)
+        let module = context
+            .load_module(ptx)
             .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {}", e))?;
 
-        let function = device
-            .get_func("pattern_detection", "pattern_detection_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to load kernel function"))?;
+        let function = module
+            .load_function("pattern_detection_kernel")
+            .map_err(|e| anyhow::anyhow!("Failed to load kernel function: {}", e))?;
 
         Ok(Arc::new(function))
     }
 
     /// Compile spectral radius computation kernel (power iteration on GPU)
-    fn compile_spectral_radius_kernel(device: &Arc<CudaDevice>) -> Result<Arc<CudaFunction>> {
+    fn compile_spectral_radius_kernel(context: &Arc<CudaContext>) -> Result<Arc<CudaFunction>> {
         let kernel_source = r#"
 extern "C" __global__ void spectral_radius_iteration_kernel(
     float* output_vector,        // Output: y = A * x
@@ -278,22 +283,18 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
 }
         "#;
 
-        // Compile CUDA source to PTX using NVRTC (cudarc 0.9)
+        // Compile CUDA source to PTX using NVRTC (cudarc 0.18.1)
         let ptx = cudarc::nvrtc::compile_ptx(kernel_source)
             .map_err(|e| anyhow::anyhow!("Failed to compile spectral radius kernel: {}", e))?;
 
-        // Load PTX module and get function (cudarc 0.9 API)
-        device
-            .load_ptx(
-                ptx,
-                "spectral_radius",
-                &["spectral_radius_iteration_kernel"],
-            )
+        // Load PTX module and get function (cudarc 0.18.1 API: load_module takes only ptx)
+        let module = context
+            .load_module(ptx)
             .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {}", e))?;
 
-        let function = device
-            .get_func("spectral_radius", "spectral_radius_iteration_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to load kernel function"))?;
+        let function = module
+            .load_function("spectral_radius_iteration_kernel")
+            .map_err(|e| anyhow::anyhow!("Failed to load kernel function: {}", e))?;
 
         Ok(Arc::new(function))
     }
@@ -332,11 +333,12 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
             .unwrap()
             .as_nanos() as u64;
 
-        // Launch kernel with optimized parameters using cudarc 0.9 API
+        // Launch kernel with optimized parameters using cudarc 0.18.1 API
         let n_neurons_u32 = n_neurons as u32;
 
         unsafe {
-            (*self.leaky_integration_kernel).clone().launch(
+            self.stream.launch(
+                &self.leaky_integration_kernel,
                 cfg,
                 (
                     current_state,     // float* current_state
@@ -352,10 +354,10 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         }
         .map_err(|e| anyhow::anyhow!("Failed to launch leaky integration kernel: {}", e))?;
 
-        // Synchronize to ensure completion
-        self.device
+        // Synchronize stream to ensure completion
+        self.stream
             .synchronize()
-            .map_err(|e| anyhow::anyhow!("Failed to synchronize device: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to synchronize stream: {}", e))?;
 
         Ok(())
     }
@@ -400,16 +402,17 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         let amplitudes_ptr = if let Some(amplitudes) = spike_amplitudes {
             amplitudes
         } else {
-            // Create a small dummy buffer for null pointer case
+            // Create a small dummy buffer for null pointer case (cudarc 0.18.1: use stream)
             dummy_buffer = self
-                .device
+                .stream
                 .alloc_zeros::<f32>(1)
                 .map_err(|e| anyhow::anyhow!("Failed to allocate dummy buffer: {}", e))?;
             &dummy_buffer
         };
 
         unsafe {
-            (*self.spike_encoding_kernel).clone().launch(
+            self.stream.launch(
+                &self.spike_encoding_kernel,
                 cfg,
                 (
                     output_vector,        // float* output_vector
@@ -425,9 +428,9 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         }
         .map_err(|e| anyhow::anyhow!("Failed to launch spike encoding kernel: {}", e))?;
 
-        self.device
+        self.stream
             .synchronize()
-            .map_err(|e| anyhow::anyhow!("Failed to synchronize device: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to synchronize stream: {}", e))?;
         Ok(())
     }
 
@@ -453,7 +456,8 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         let n_patterns_u32 = n_patterns as u32;
 
         unsafe {
-            (*self.pattern_detection_kernel).clone().launch(
+            self.stream.launch(
+                &self.pattern_detection_kernel,
                 cfg,
                 (
                     pattern_scores,    // float* pattern_scores
@@ -467,9 +471,9 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         }
         .map_err(|e| anyhow::anyhow!("Failed to launch pattern detection kernel: {}", e))?;
 
-        self.device
+        self.stream
             .synchronize()
-            .map_err(|e| anyhow::anyhow!("Failed to synchronize device: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to synchronize stream: {}", e))?;
         Ok(())
     }
 
@@ -492,15 +496,15 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
             shared_mem_bytes: config.block_size * 4, // For reduction
         };
 
-        // Clear norm result - cudarc 0.9 API
-        self.device
+        // Clear norm result - cudarc 0.18.1 API (use stream)
+        self.stream
             .memset_zeros(norm_result)
             .map_err(|e| anyhow::anyhow!("Failed to clear norm result: {}", e))?;
 
         let n_dim_u32 = n_dim as u32;
 
         unsafe {
-            (*self.spectral_radius_kernel).clone().launch(
+            self.stream.launch(&self.spectral_radius_kernel,
                 cfg,
                 (
                     output_vector, // float* output_vector
@@ -513,15 +517,20 @@ extern "C" __global__ void spectral_radius_iteration_kernel(
         }
         .map_err(|e| anyhow::anyhow!("Failed to launch spectral radius kernel: {}", e))?;
 
-        self.device
+        self.stream
             .synchronize()
-            .map_err(|e| anyhow::anyhow!("Failed to synchronize device: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to synchronize stream: {}", e))?;
         Ok(())
     }
 
-    /// Get device reference
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get context reference
+    pub fn context(&self) -> &Arc<CudaContext> {
+        &self.context
+    }
+
+    /// Get stream reference
+    pub fn stream(&self) -> &Arc<CudaStream> {
+        &self.stream
     }
 }
 
@@ -546,8 +555,8 @@ pub struct KernelPerformanceStats {
 
 impl NeuromorphicKernelManager {
     /// Create kernel manager with RTX 5070 optimization
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
-        let kernels = NeuromorphicKernels::new(device)?;
+    pub fn new(context: Arc<CudaContext>) -> Result<Self> {
+        let kernels = NeuromorphicKernels::new(context)?;
         let config = KernelConfig::default();
 
         Ok(Self {
@@ -612,7 +621,7 @@ impl NeuromorphicKernelManager {
 impl fmt::Debug for NeuromorphicKernels {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NeuromorphicKernels")
-            .field("device", &self.device)
+            .field("device", &self.context)
             .field("leaky_integration_kernel", &"CudaFunction")
             .field("spike_encoding_kernel", &"CudaFunction")
             .field("pattern_detection_kernel", &"CudaFunction")
@@ -638,9 +647,9 @@ mod tests {
     #[test]
     #[ignore] // Requires CUDA-capable GPU
     fn test_kernel_compilation() {
-        if let Ok(device) = CudaDevice::new(0) {
-            // cudarc 0.9: CudaDevice::new() returns Arc<CudaDevice> directly
-            let kernels = NeuromorphicKernels::new(device);
+        if let Ok(context) = CudaContext::new(0) {
+            // cudarc 0.18.1: CudaContext::new() returns Arc<CudaContext>
+            let kernels = NeuromorphicKernels::new(context);
 
             match kernels {
                 Ok(_) => println!("All CUDA kernels compiled successfully"),
@@ -652,16 +661,17 @@ mod tests {
     #[test]
     #[ignore] // Requires CUDA-capable GPU
     fn test_leaky_integration_performance() {
-        if let Ok(device) = CudaDevice::new(0) {
-            // cudarc 0.9: CudaDevice::new() returns Arc<CudaDevice> directly
-            if let Ok(mut manager) = NeuromorphicKernelManager::new(device.clone()) {
+        if let Ok(context) = CudaContext::new(0) {
+            // cudarc 0.18.1: CudaContext::new() returns Arc<CudaContext>
+            if let Ok(mut manager) = NeuromorphicKernelManager::new(context.clone()) {
                 let n_neurons = 1000;
+                let stream = context.default_stream();
 
-                // Allocate test buffers (cudarc 0.9 API)
-                let mut current_state = device.alloc_zeros::<f32>(n_neurons).unwrap();
-                let previous_state = device.alloc_zeros::<f32>(n_neurons).unwrap();
-                let input_contrib = device.alloc_zeros::<f32>(n_neurons).unwrap();
-                let recurrent_contrib = device.alloc_zeros::<f32>(n_neurons).unwrap();
+                // Allocate test buffers (cudarc 0.18.1 API - use stream)
+                let mut current_state = stream.alloc_zeros::<f32>(n_neurons).unwrap();
+                let previous_state = stream.alloc_zeros::<f32>(n_neurons).unwrap();
+                let input_contrib = stream.alloc_zeros::<f32>(n_neurons).unwrap();
+                let recurrent_contrib = stream.alloc_zeros::<f32>(n_neurons).unwrap();
 
                 // Benchmark kernel execution
                 let start = std::time::Instant::now();

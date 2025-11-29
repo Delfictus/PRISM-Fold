@@ -31,7 +31,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 
 #[cfg(feature = "cuda")]
 use crate::world_record_pipeline_gpu::GpuReservoirConflictPredictor;
@@ -1455,7 +1455,7 @@ pub struct QuantumClassicalHybrid {
 
 impl QuantumClassicalHybrid {
     #[cfg(feature = "cuda")]
-    pub fn new(max_colors: usize, cuda_device: Option<Arc<CudaDevice>>) -> Result<Self> {
+    pub fn new(max_colors: usize, cuda_device: Option<Arc<CudaContext>>) -> Result<Self> {
         Ok(Self {
             quantum_solver: QuantumColoringSolver::new(cuda_device)?,
             classical_solver: DSaturSolver::new(max_colors, 50000),
@@ -1765,9 +1765,9 @@ pub struct WorldRecordPipeline {
     /// ADP Q-table for parameter tuning
     adp_q_table: std::collections::HashMap<(ColoringState, ColoringAction), f64>,
 
-    /// Shared CUDA device for GPU acceleration
+    /// Shared CUDA context for GPU acceleration
     #[cfg(feature = "cuda")]
-    cuda_device: Arc<CudaDevice>,
+    cuda_device: Arc<CudaContext>,
 
     /// Multi-GPU device pool (if enabled)
     #[cfg(feature = "cuda")]
@@ -1800,7 +1800,7 @@ pub struct WorldRecordPipeline {
 
 impl WorldRecordPipeline {
     #[cfg(feature = "cuda")]
-    pub fn new(config: WorldRecordConfig, cuda_device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(config: WorldRecordConfig, cuda_device: Arc<CudaContext>) -> Result<Self> {
         config.validate()?;
 
         // Initialize Rayon thread pool with configured CPU threads
@@ -4103,7 +4103,7 @@ impl Default for WorldRecordPipeline {
     #[cfg(feature = "cuda")]
     fn default() -> Self {
         // Default implementation for testing/convenience - in production, use explicit new()
-        let device = CudaDevice::new(0)
+        let device = CudaContext::new(0)
             .expect("[DEFAULT][FATAL] Failed to create CUDA device 0 for default pipeline");
         Self::new(WorldRecordConfig::default(), device).expect(
             "[DEFAULT][FATAL] Failed to create default WorldRecordPipeline with default config",

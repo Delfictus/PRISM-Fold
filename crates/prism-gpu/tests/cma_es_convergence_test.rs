@@ -8,7 +8,7 @@
 //! Run with: cargo test -p prism-gpu --features cuda cma_es_convergence
 
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_gpu::cma_es::{CmaOptimizer, CmaParams};
 use std::sync::Arc;
 
@@ -17,8 +17,8 @@ use std::sync::Arc;
 #[test]
 fn test_cma_es_sphere_function() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());
@@ -77,8 +77,8 @@ fn test_cma_es_sphere_function() -> Result<()> {
 #[test]
 fn test_cma_es_rosenbrock() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());
@@ -136,8 +136,8 @@ fn test_cma_es_rosenbrock() -> Result<()> {
 #[test]
 fn test_cma_es_high_dimensional() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());
@@ -188,8 +188,8 @@ fn test_cma_es_high_dimensional() -> Result<()> {
 #[test]
 fn test_cma_es_performance() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());
@@ -241,8 +241,8 @@ fn test_cma_es_performance() -> Result<()> {
 #[test]
 fn test_cma_es_state_management() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());
@@ -303,8 +303,8 @@ fn test_cma_es_state_management() -> Result<()> {
 #[test]
 fn test_cma_es_convergence_detection() -> Result<()> {
     // Skip test if no CUDA device available
-    let device = match CudaDevice::new(0) {
-        Ok(dev) => dev, // CudaDevice::new already returns Arc<CudaDevice>
+    let device = match CudaContext::new(0) {
+        Ok(dev) => dev, // CudaContext::new already returns Arc<CudaContext>
         Err(_) => {
             eprintln!("Skipping test: No CUDA device available");
             return Ok(());

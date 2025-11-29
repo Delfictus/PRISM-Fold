@@ -16,9 +16,9 @@ use std::collections::HashSet;
 
 /// Quantum coloring solver using PIMC quantum annealing
 pub struct QuantumColoringSolver {
-    /// GPU device for CUDA acceleration
+    /// GPU context for CUDA acceleration
     #[cfg(feature = "cuda")]
-    gpu_device: Option<std::sync::Arc<cudarc::driver::CudaDevice>>,
+    gpu_device: Option<std::sync::Arc<cudarc::driver::CudaContext>>,
 
     /// Telemetry handle for detailed tracking
     telemetry: Option<std::sync::Arc<crate::telemetry::TelemetryHandle>>,
@@ -27,17 +27,16 @@ pub struct QuantumColoringSolver {
 impl QuantumColoringSolver {
     /// Create new quantum coloring solver
     pub fn new(
-        #[cfg(feature = "cuda")] gpu_device: Option<std::sync::Arc<cudarc::driver::CudaDevice>>,
+        #[cfg(feature = "cuda")] gpu_device: Option<std::sync::Arc<cudarc::driver::CudaContext>>,
     ) -> Result<Self> {
         #[cfg(feature = "cuda")]
         {
-            if let Some(ref dev) = gpu_device {
+            if let Some(ref _dev) = gpu_device {
                 println!(
-                    "[QUANTUM][GPU] GPU acceleration ACTIVE on device {}",
-                    dev.ordinal()
+                    "[QUANTUM][GPU] GPU acceleration ACTIVE"
                 );
             } else {
-                println!("[QUANTUM][CPU] GPU device not provided, using CPU fallback");
+                println!("[QUANTUM][CPU] GPU context not provided, using CPU fallback");
             }
         }
 
@@ -1097,7 +1096,7 @@ impl QuantumColoringSolver {
     #[cfg(feature = "cuda")]
     fn find_coloring_gpu(
         &mut self,
-        cuda_device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+        cuda_device: &std::sync::Arc<cudarc::driver::CudaContext>,
         graph: &Graph,
         _phase_field: &PhaseField,
         kuramoto_state: &KuramotoState,

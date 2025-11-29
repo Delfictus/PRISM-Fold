@@ -4,7 +4,7 @@
 //! Phase 2 of the PRISM world-record pipeline.
 //!
 //! Constitutional Compliance:
-//! - Article V: Uses shared CUDA context (Arc<CudaDevice>)
+//! - Article V: Uses shared CUDA context (Arc<CudaContext>)
 //! - Article VII: Kernels compiled in build.rs
 //! - Zero stubs: Full implementation, no todo!/unimplemented!
 
@@ -41,7 +41,7 @@ use std::sync::Arc;
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
 pub fn equilibrate_thermodynamic_gpu(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     stream: &CudaStream, // Stream for async execution (cudarc 0.9: synchronous, prepared for future)
     graph: &Graph,
     initial_solution: &ColoringSolution,
@@ -63,6 +63,7 @@ pub fn equilibrate_thermodynamic_gpu(
     reheat_consecutive_guards: usize,
     reheat_temp_boost: f64,
 ) -> Result<Vec<ColoringSolution>> {
+    let stream = context.default_stream();
     // Note: cudarc 0.9 doesn't support async stream execution, but we accept the parameter
     // for API consistency and future cudarc 0.17+ upgrade
     let _ = stream; // Will be used when cudarc supports stream.launch()

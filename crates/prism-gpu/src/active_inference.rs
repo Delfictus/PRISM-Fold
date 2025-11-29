@@ -20,7 +20,7 @@
 //! - **Pragmatic Value**: Goal-directed (vertex degree-based)
 //! - **Epistemic Value**: Information-seeking (phase variance-based)
 
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, CudaStream, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
 use prism_core::{Graph, PrismError};
 use std::sync::Arc;
@@ -76,7 +76,8 @@ impl ActiveInferencePolicy {
 ///
 /// Spec reference: foundation/active_inference/gpu.rs:21-45
 pub struct ActiveInferenceGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
 
     // CUDA kernels from active_inference.ptx
     _gemv_kernel: Arc<CudaFunction>,
@@ -105,53 +106,52 @@ impl ActiveInferenceGpu {
     ///
     /// # Errors
     /// Returns PrismError::GpuInitError if PTX loading fails
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self, PrismError> {
+    pub fn new(context: Arc<CudaContext>, ptx_path: &str) -> Result<Self, PrismError> {
         log::info!("[ActiveInferenceGpu] Loading PTX from: {}", ptx_path);
+
+        // Get default stream
+        let stream = context.default_stream();
 
         // Load PTX module (spec reference: foundation/active_inference/gpu.rs:54-77)
         let ptx = Ptx::from_file(ptx_path);
-        let kernel_names = vec![
-            "gemv_kernel",
-            "prediction_error_kernel",
-            "belief_update_kernel",
-            "precision_weight_kernel",
-            "kl_divergence_kernel",
-            "accuracy_kernel",
-            "sum_reduction_kernel",
-            "axpby_kernel",
-        ];
+        let module = context.load_module(ptx).map_err(|e| {
+            PrismError::gpu(
+                "active_inference",
+                format!("Failed to load active_inference module: {}", e),
+            )
+        })?;
 
-        device
-            .load_ptx(ptx, "active_inference", &kernel_names)
-            .map_err(|e| {
-                PrismError::gpu(
-                    "active_inference",
-                    format!("Failed to load active_inference kernels: {}", e),
-                )
-            })?;
-
-        // Get kernel handles
-        let get_kernel = |name: &str| -> Result<Arc<CudaFunction>, PrismError> {
-            Ok(Arc::new(
-                device.get_func("active_inference", name).ok_or_else(|| {
-                    PrismError::gpu("active_inference", format!("Kernel {} not found", name))
-                })?,
-            ))
-        };
-
-        let gemv_kernel = get_kernel("gemv_kernel")?;
-        let prediction_error_kernel = get_kernel("prediction_error_kernel")?;
-        let belief_update_kernel = get_kernel("belief_update_kernel")?;
-        let precision_weight_kernel = get_kernel("precision_weight_kernel")?;
-        let kl_divergence_kernel = get_kernel("kl_divergence_kernel")?;
-        let accuracy_kernel = get_kernel("accuracy_kernel")?;
-        let sum_reduction_kernel = get_kernel("sum_reduction_kernel")?;
-        let axpby_kernel = get_kernel("axpby_kernel")?;
+        // Load kernel functions
+        let gemv_kernel = Arc::new(module.load_function("gemv_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load gemv_kernel: {}", e))
+        })?);
+        let prediction_error_kernel = Arc::new(module.load_function("prediction_error_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load prediction_error_kernel: {}", e))
+        })?);
+        let belief_update_kernel = Arc::new(module.load_function("belief_update_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load belief_update_kernel: {}", e))
+        })?);
+        let precision_weight_kernel = Arc::new(module.load_function("precision_weight_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load precision_weight_kernel: {}", e))
+        })?);
+        let kl_divergence_kernel = Arc::new(module.load_function("kl_divergence_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load kl_divergence_kernel: {}", e))
+        })?);
+        let accuracy_kernel = Arc::new(module.load_function("accuracy_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load accuracy_kernel: {}", e))
+        })?);
+        let sum_reduction_kernel = Arc::new(module.load_function("sum_reduction_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load sum_reduction_kernel: {}", e))
+        })?);
+        let axpby_kernel = Arc::new(module.load_function("axpby_kernel").map_err(|e| {
+            PrismError::gpu("active_inference", format!("Failed to load axpby_kernel: {}", e))
+        })?);
 
         log::info!("[ActiveInferenceGpu] Loaded 8 kernels successfully");
 
         Ok(Self {
-            device,
+            context,
+            stream,
             _gemv_kernel: gemv_kernel,
             prediction_error_kernel,
             _belief_update_kernel: belief_update_kernel,
@@ -207,13 +207,13 @@ impl ActiveInferenceGpu {
         let precision = self.compute_precision(graph)?;
 
         // Upload data to GPU
-        let d_observations = self.device.htod_sync_copy(&observations).map_err(|e| {
+        let d_observations = self.stream.clone_htod(&observations).map_err(|e| {
             PrismError::gpu("active_inference", format!("Failed to upload obs: {}", e))
         })?;
-        let d_mean = self.device.htod_sync_copy(&initial_mean).map_err(|e| {
+        let d_mean = self.stream.clone_htod(&initial_mean).map_err(|e| {
             PrismError::gpu("active_inference", format!("Failed to upload mean: {}", e))
         })?;
-        let d_precision = self.device.htod_sync_copy(&precision).map_err(|e| {
+        let d_precision = self.stream.clone_htod(&precision).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to upload precision: {}", e),
@@ -221,7 +221,7 @@ impl ActiveInferenceGpu {
         })?;
 
         // Allocate workspace for prediction errors
-        let mut d_pred_error = self.device.alloc_zeros::<f64>(n).map_err(|e| {
+        let mut d_pred_error = self.stream.alloc_zeros::<f64>(n).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to allocate pred_error: {}", e),
@@ -238,18 +238,14 @@ impl ActiveInferenceGpu {
         };
 
         unsafe {
-            (*self.prediction_error_kernel)
-                .clone()
-                .launch(
-                    cfg,
-                    (
-                        &mut d_pred_error,
-                        &d_observations,
-                        &d_mean,
-                        &d_precision,
-                        n as i32,
-                    ),
-                )
+            self.stream
+                .launch_builder(&*self.prediction_error_kernel)
+                .arg(&mut d_pred_error)
+                .arg(&d_observations)
+                .arg(&d_mean)
+                .arg(&d_precision)
+                .arg(&(n as i32))
+                .launch(cfg)
                 .map_err(|e| {
                     PrismError::gpu(
                         "active_inference",
@@ -259,7 +255,7 @@ impl ActiveInferenceGpu {
         }
 
         // Download prediction errors
-        let pred_errors = self.device.dtoh_sync_copy(&d_pred_error).map_err(|e| {
+        let pred_errors = self.stream.clone_dtoh(&d_pred_error).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to download errors: {}", e),
@@ -398,22 +394,22 @@ impl ActiveInferenceGpu {
         let n = mean_posterior.len();
 
         // Upload data to GPU
-        let d_mean_q = self.device.htod_sync_copy(mean_posterior).map_err(|e| {
+        let d_mean_q = self.stream.clone_htod(mean_posterior).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to upload mean_q: {}", e),
             )
         })?;
-        let d_mean_p = self.device.htod_sync_copy(mean_prior).map_err(|e| {
+        let d_mean_p = self.stream.clone_htod(mean_prior).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to upload mean_p: {}", e),
             )
         })?;
-        let d_var_q = self.device.htod_sync_copy(var_posterior).map_err(|e| {
+        let d_var_q = self.stream.clone_htod(var_posterior).map_err(|e| {
             PrismError::gpu("active_inference", format!("Failed to upload var_q: {}", e))
         })?;
-        let d_var_p = self.device.htod_sync_copy(var_prior).map_err(|e| {
+        let d_var_p = self.stream.clone_htod(var_prior).map_err(|e| {
             PrismError::gpu("active_inference", format!("Failed to upload var_p: {}", e))
         })?;
 
@@ -426,7 +422,7 @@ impl ActiveInferenceGpu {
         };
 
         // Compute KL divergence (complexity)
-        let mut d_kl_components = self.device.alloc_zeros::<f64>(n).map_err(|e| {
+        let mut d_kl_components = self.stream.alloc_zeros::<f64>(n).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to allocate kl_components: {}", e),
@@ -434,19 +430,15 @@ impl ActiveInferenceGpu {
         })?;
 
         unsafe {
-            (*self.kl_divergence_kernel)
-                .clone()
-                .launch(
-                    cfg,
-                    (
-                        &d_mean_q,
-                        &d_mean_p,
-                        &d_var_q,
-                        &d_var_p,
-                        &mut d_kl_components,
-                        n as i32,
-                    ),
-                )
+            self.stream
+                .launch_builder(&*self.kl_divergence_kernel)
+                .arg(&d_mean_q)
+                .arg(&d_mean_p)
+                .arg(&d_var_q)
+                .arg(&d_var_p)
+                .arg(&mut d_kl_components)
+                .arg(&(n as i32))
+                .launch(cfg)
                 .map_err(|e| {
                     PrismError::gpu(
                         "active_inference",
@@ -456,7 +448,7 @@ impl ActiveInferenceGpu {
         }
 
         // Sum KL components
-        let mut d_complexity = self.device.alloc_zeros::<f64>(1).map_err(|e| {
+        let mut d_complexity = self.stream.alloc_zeros::<f64>(1).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to allocate complexity: {}", e),
@@ -464,9 +456,12 @@ impl ActiveInferenceGpu {
         })?;
 
         unsafe {
-            (*self.sum_reduction_kernel)
-                .clone()
-                .launch(cfg, (&d_kl_components, &mut d_complexity, n as i32))
+            self.stream
+                .launch_builder(&*self.sum_reduction_kernel)
+                .arg(&d_kl_components)
+                .arg(&mut d_complexity)
+                .arg(&(n as i32))
+                .launch(cfg)
                 .map_err(|e| {
                     PrismError::gpu(
                         "active_inference",
@@ -476,10 +471,10 @@ impl ActiveInferenceGpu {
         }
 
         // Compute accuracy (similar process for prediction errors)
-        let d_obs = self.device.htod_sync_copy(observations).map_err(|e| {
+        let d_obs = self.stream.clone_htod(observations).map_err(|e| {
             PrismError::gpu("active_inference", format!("Failed to upload obs: {}", e))
         })?;
-        let d_precision = self.device.htod_sync_copy(obs_precision).map_err(|e| {
+        let d_precision = self.stream.clone_htod(obs_precision).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to upload precision: {}", e),
@@ -487,7 +482,7 @@ impl ActiveInferenceGpu {
         })?;
 
         let mut d_errors = self
-            .device
+            .stream
             .alloc_zeros::<f64>(observations.len())
             .map_err(|e| {
                 PrismError::gpu(
@@ -503,18 +498,14 @@ impl ActiveInferenceGpu {
         };
 
         unsafe {
-            (*self.prediction_error_kernel)
-                .clone()
-                .launch(
-                    obs_cfg,
-                    (
-                        &mut d_errors,
-                        &d_obs,
-                        &d_mean_q,
-                        &d_precision,
-                        observations.len() as i32,
-                    ),
-                )
+            self.stream
+                .launch_builder(&*self.prediction_error_kernel)
+                .arg(&mut d_errors)
+                .arg(&d_obs)
+                .arg(&d_mean_q)
+                .arg(&d_precision)
+                .arg(&(observations.len() as i32))
+                .launch(obs_cfg)
                 .map_err(|e| {
                     PrismError::gpu(
                         "active_inference",
@@ -524,7 +515,7 @@ impl ActiveInferenceGpu {
         }
 
         let mut d_accuracy_components = self
-            .device
+            .stream
             .alloc_zeros::<f64>(observations.len())
             .map_err(|e| {
                 PrismError::gpu(
@@ -534,23 +525,19 @@ impl ActiveInferenceGpu {
             })?;
 
         unsafe {
-            (*self.accuracy_kernel)
-                .clone()
-                .launch(
-                    obs_cfg,
-                    (
-                        &d_errors,
-                        &d_precision,
-                        &mut d_accuracy_components,
-                        observations.len() as i32,
-                    ),
-                )
+            self.stream
+                .launch_builder(&*self.accuracy_kernel)
+                .arg(&d_errors)
+                .arg(&d_precision)
+                .arg(&mut d_accuracy_components)
+                .arg(&(observations.len() as i32))
+                .launch(obs_cfg)
                 .map_err(|e| {
                     PrismError::gpu("active_inference", format!("Accuracy kernel failed: {}", e))
                 })?;
         }
 
-        let mut d_accuracy = self.device.alloc_zeros::<f64>(1).map_err(|e| {
+        let mut d_accuracy = self.stream.alloc_zeros::<f64>(1).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to allocate accuracy: {}", e),
@@ -558,16 +545,12 @@ impl ActiveInferenceGpu {
         })?;
 
         unsafe {
-            (*self.sum_reduction_kernel)
-                .clone()
-                .launch(
-                    obs_cfg,
-                    (
-                        &d_accuracy_components,
-                        &mut d_accuracy,
-                        observations.len() as i32,
-                    ),
-                )
+            self.stream
+                .launch_builder(&*self.sum_reduction_kernel)
+                .arg(&d_accuracy_components)
+                .arg(&mut d_accuracy)
+                .arg(&(observations.len() as i32))
+                .launch(obs_cfg)
                 .map_err(|e| {
                     PrismError::gpu(
                         "active_inference",
@@ -577,13 +560,13 @@ impl ActiveInferenceGpu {
         }
 
         // Download results
-        let complexity_vec = self.device.dtoh_sync_copy(&d_complexity).map_err(|e| {
+        let complexity_vec = self.stream.clone_dtoh(&d_complexity).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to download complexity: {}", e),
             )
         })?;
-        let accuracy_vec = self.device.dtoh_sync_copy(&d_accuracy).map_err(|e| {
+        let accuracy_vec = self.stream.clone_dtoh(&d_accuracy).map_err(|e| {
             PrismError::gpu(
                 "active_inference",
                 format!("Failed to download accuracy: {}", e),

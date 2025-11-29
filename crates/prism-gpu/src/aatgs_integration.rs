@@ -41,11 +41,11 @@
 //! ```rust,no_run
 //! use prism_gpu::aatgs_integration::GpuExecutionContext;
 //! use prism_core::RuntimeConfig;
-//! use cudarc::driver::CudaDevice;
+//! use cudarc::driver::CudaContext;
 //! use std::sync::Arc;
 //!
 //! // Create context with async enabled
-//! let device = CudaDevice::new(0).unwrap();
+//! let device = CudaContext::new(0).unwrap();
 //! let mut ctx = GpuExecutionContext::new(Arc::new(device), true).unwrap();
 //!
 //! // Execute with async scheduling
@@ -54,7 +54,7 @@
 //! ```
 
 use anyhow::{Context, Result};
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 use crate::aatgs::AsyncPipeline;
@@ -74,7 +74,7 @@ use prism_core::{KernelTelemetry, RuntimeConfig};
 /// - **Error recovery**: Graceful handling of buffer overflow and GPU errors
 pub struct GpuExecutionContext {
     /// Shared CUDA device
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
     /// Async pipeline (None = sync mode)
     async_pipeline: Option<AsyncPipeline>,
@@ -125,26 +125,26 @@ impl GpuExecutionContext {
     /// # Example
     /// ```rust,no_run
     /// use prism_gpu::aatgs_integration::GpuExecutionContext;
-    /// use cudarc::driver::CudaDevice;
+    /// use cudarc::driver::CudaContext;
     /// use std::sync::Arc;
     ///
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let ctx = GpuExecutionContext::new(Arc::new(device), true).unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, enable_async: bool) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, enable_async: bool) -> Result<Self> {
         log::info!(
             "Creating GPU execution context (async: {})",
             enable_async
         );
 
         let async_pipeline = if enable_async {
-            Some(AsyncPipeline::new(device.clone()).context("Failed to initialize AATGS pipeline")?)
+            Some(AsyncPipeline::new(context.clone()).context("Failed to initialize AATGS pipeline")?)
         } else {
             None
         };
 
         Ok(Self {
-            device,
+            context,
             async_pipeline,
             use_async: enable_async,
             stats: ExecutionStats::default(),
@@ -169,9 +169,9 @@ impl GpuExecutionContext {
     /// ```rust,no_run
     /// # use prism_gpu::aatgs_integration::GpuExecutionContext;
     /// # use prism_core::RuntimeConfig;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = CudaDevice::new(0).unwrap();
+    /// # let device = CudaContext::new(0).unwrap();
     /// # let mut ctx = GpuExecutionContext::new(Arc::new(device), true).unwrap();
     /// let config = RuntimeConfig::production();
     /// if let Some(telemetry) = ctx.execute(config).unwrap() {
@@ -283,7 +283,7 @@ impl GpuExecutionContext {
         );
 
         // Synchronize device to ensure previous operations complete
-        self.device
+        self.context
             .synchronize()
             .context("Device synchronization failed")?;
 
@@ -332,8 +332,8 @@ impl GpuExecutionContext {
     }
 
     /// Get reference to underlying CUDA device
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Check if async mode is enabled
@@ -375,7 +375,7 @@ impl GpuExecutionContext {
             pipeline.shutdown().context("AATGS shutdown failed")?;
         }
 
-        self.device
+        self.context
             .synchronize()
             .context("Final device synchronization failed")?;
 
@@ -415,25 +415,25 @@ impl Drop for GpuExecutionContext {
 /// # Example
 /// ```rust,no_run
 /// use prism_gpu::aatgs_integration::GpuExecutionContextBuilder;
-/// use cudarc::driver::CudaDevice;
+/// use cudarc::driver::CudaContext;
 /// use std::sync::Arc;
 ///
-/// let device = CudaDevice::new(0).unwrap();
+/// let device = CudaContext::new(0).unwrap();
 /// let ctx = GpuExecutionContextBuilder::new(Arc::new(device))
 ///     .enable_async(true)
 ///     .build()
 ///     .unwrap();
 /// ```
 pub struct GpuExecutionContextBuilder {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
     enable_async: bool,
 }
 
 impl GpuExecutionContextBuilder {
     /// Create new builder with device
-    pub fn new(device: Arc<CudaDevice>) -> Self {
+    pub fn new(context: Arc<CudaContext>) -> Self {
         Self {
-            device,
+            context,
             enable_async: false, // Default to sync mode
         }
     }
@@ -446,7 +446,7 @@ impl GpuExecutionContextBuilder {
 
     /// Build the execution context
     pub fn build(self) -> Result<GpuExecutionContext> {
-        GpuExecutionContext::new(self.device, self.enable_async)
+        GpuExecutionContext::new(self.context, self.enable_async)
     }
 }
 
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_context_sync_mode() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let ctx = GpuExecutionContext::new(Arc::new(device), false);
         assert!(ctx.is_ok());
         assert!(!ctx.unwrap().is_async());
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_context_async_mode() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let ctx = GpuExecutionContext::new(Arc::new(device), true);
         assert!(ctx.is_ok());
         assert!(ctx.unwrap().is_async());
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_execute_sync() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let mut ctx = GpuExecutionContext::new(Arc::new(device), false).unwrap();
 
         let config = RuntimeConfig::production();
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_execute_async() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let mut ctx = GpuExecutionContext::new(Arc::new(device), true).unwrap();
 
         let config = RuntimeConfig::production();

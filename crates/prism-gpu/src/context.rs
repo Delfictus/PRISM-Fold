@@ -1,7 +1,7 @@
 //! GPU context management with security and telemetry.
 //!
 //! ASSUMPTIONS:
-//! - CudaDevice::new(device_id) initializes CUDA runtime
+//! - CudaContext::new(device_id) initializes CUDA runtime
 //! - PTX modules are pre-compiled and stored in ptx_dir
 //! - PTX signature files follow naming: <module>.ptx.sha256
 //! - SHA256 signatures are hex-encoded strings
@@ -20,7 +20,8 @@
 //! REFERENCE: PRISM GPU Plan §4.0 (GPU Context Management)
 
 use anyhow::{Context, Result};
-use cudarc::driver::CudaDevice;
+use cudarc::driver::{CudaContext, CudaModule};
+use cudarc::nvrtc::Ptx;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -79,7 +80,7 @@ pub struct GpuInfo {
 
 /// GPU context handle managing CUDA device and loaded PTX modules.
 ///
-/// Thread-safe via Arc<CudaDevice>. Maintains a registry of loaded
+/// Thread-safe via Arc<CudaContext>. Maintains a registry of loaded
 /// PTX modules for efficient kernel access across phases.
 ///
 /// # Example
@@ -99,10 +100,10 @@ pub struct GpuInfo {
 /// ```
 pub struct GpuContext {
     /// CUDA device handle (shared across modules)
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
-    /// Registry of loaded PTX module names (for tracking)
-    modules: HashMap<String, ()>,
+    /// Registry of loaded PTX modules (module_name -> CudaModule)
+    modules: HashMap<String, Arc<CudaModule>>,
 
     /// Security configuration
     security_config: GpuSecurityConfig,
@@ -173,14 +174,14 @@ impl GpuContext {
             ptx_dir.display()
         );
 
-        // Initialize CUDA device (cudarc returns Arc<CudaDevice>)
-        let device = CudaDevice::new(device_id)
+        // Initialize CUDA device (cudarc returns Arc<CudaContext>)
+        let context = CudaContext::new(device_id)
             .with_context(|| format!("Failed to initialize CUDA device {}", device_id))?;
 
         log::info!("CUDA device {} initialized", device_id);
 
         let mut ctx = Self {
-            device,
+            context,
             modules: HashMap::new(),
             security_config,
             ptx_dir: ptx_dir.to_path_buf(),
@@ -319,36 +320,18 @@ impl GpuContext {
             self.verify_ptx_signature(ptx_path)?;
         }
 
-        // Read PTX content
+        // Read PTX content as string
         let ptx_str = std::fs::read_to_string(ptx_path)
             .with_context(|| format!("Failed to read PTX file: {}", ptx_path.display()))?;
 
-        // Note: cudarc's load_ptx does not support custom kernel names in the registry.
-        // We load the PTX but cannot directly retrieve CudaModule from the device.
-        // Instead, we need to use device.get_func() later to access kernels.
-        // For now, we'll store the PTX content and mark it as loaded.
+        // Create Ptx from source string
+        let ptx = Ptx::from_src(ptx_str);
 
-        // Load PTX into device (this registers kernels internally)
-        // The actual module handle is managed by cudarc; we just track that it's loaded
-        self.device
-            .load_ptx(
-                ptx_str.into(),
-                name,
-                &[], // Empty function list - cudarc will discover all kernels
-            )
+        // Load PTX module into device context
+        // In cudarc 0.18.1, load_module() returns Arc<CudaModule> which we can store
+        let module = self.context
+            .load_module(ptx)
             .with_context(|| format!("Failed to load PTX module '{}'", name))?;
-
-        // Note: cudarc doesn't give us a CudaModule handle directly from load_ptx.
-        // The kernels are registered and accessed via device.get_func(module_name, kernel_name).
-        // We'll store a placeholder to track loaded modules.
-        // The actual CudaModule type is opaque in cudarc, so we can't store it directly.
-        // Instead, we just mark the module as loaded in our registry.
-
-        // Since we can't store the actual CudaModule (it's internal to CudaDevice),
-        // we'll just track loaded module names for validation purposes.
-        // Remove the modules HashMap<String, CudaModule> and replace with HashSet<String>.
-        // Actually, looking at the other implementations, they don't store modules either.
-        // They just call device.get_func() when needed. Let's simplify.
 
         log::info!(
             "PTX module '{}' loaded successfully (path: {})",
@@ -356,8 +339,8 @@ impl GpuContext {
             ptx_path.display()
         );
 
-        // Mark module as loaded (kernels accessed via device.get_func())
-        self.modules.insert(name.to_string(), ());
+        // Store module in registry for later access
+        self.modules.insert(name.to_string(), module);
 
         Ok(())
     }
@@ -447,6 +430,29 @@ impl GpuContext {
         self.modules.contains_key(name)
     }
 
+    /// Gets a loaded module by name.
+    ///
+    /// # Arguments
+    /// * `name` - Module name (without .ptx extension)
+    ///
+    /// # Returns
+    /// Reference to the loaded CudaModule, or None if not found.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use prism_gpu::context::{GpuContext, GpuSecurityConfig};
+    /// # use std::path::Path;
+    /// # let ctx = GpuContext::new(0, GpuSecurityConfig::default(), Path::new("target/ptx"))?;
+    /// if let Some(module) = ctx.get_module("quantum") {
+    ///     let kernel = module.load_function("quantum_evolution")?;
+    ///     // Use kernel...
+    /// }
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn get_module(&self, name: &str) -> Option<&Arc<CudaModule>> {
+        self.modules.get(name)
+    }
+
     /// Returns reference to underlying CUDA device.
     ///
     /// Use this to create GPU-accelerated phase controllers:
@@ -460,8 +466,8 @@ impl GpuContext {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Returns whether security mode is enabled (signed PTX required).
@@ -502,7 +508,7 @@ impl GpuContext {
         // Placeholder device name (would need to query via CUDA driver API)
         let device_name = "CUDA Device".to_string();
 
-        // cudarc doesn't expose total_memory() on Arc<CudaDevice>
+        // cudarc doesn't expose total_memory() on Arc<CudaContext>
         // We need to use ordinal() to get device ID
         let device_id = 0; // Placeholder - would need to track device_id separately
 
@@ -581,7 +587,7 @@ impl GpuContext {
     /// ```
     pub fn is_available() -> bool {
         // Try to initialize device 0 (default GPU)
-        match CudaDevice::new(0) {
+        match CudaContext::new(0) {
             Ok(_) => {
                 log::debug!("GPU detected and available");
                 true
@@ -603,9 +609,6 @@ impl GpuContext {
         &self.security_config
     }
 }
-
-// Note: We remove the get_module() method since cudarc doesn't expose CudaModule directly.
-// Phase implementations should use ctx.device().get_func(module_name, kernel_name) instead.
 
 #[cfg(test)]
 mod tests {

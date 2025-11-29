@@ -2,14 +2,14 @@
 //!
 //! Tests performance on DSJC benchmarks and reports timing.
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_gpu::TdaGpu;
 use std::sync::Arc;
 use std::time::Instant;
 
 /// Helper: Initialize GPU for benchmarks
 fn init_gpu() -> anyhow::Result<TdaGpu> {
-    let device = CudaDevice::new(0)?;
+    let device = CudaContext::new(0)?;
     TdaGpu::new(Arc::new(device), "target/ptx/tda.ptx")
 }
 

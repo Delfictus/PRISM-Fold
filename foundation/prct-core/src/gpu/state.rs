@@ -12,13 +12,13 @@
 use crate::errors::*;
 use crate::gpu::event::EventRegistry;
 use crate::gpu::stream_pool::CudaStreamPool;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 /// Centralized GPU state for pipeline execution
 pub struct PipelineGpuState {
     /// Single shared device (constitutional requirement)
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
     /// Stream pool for parallel phase execution
     stream_pool: Arc<CudaStreamPool>,
@@ -54,22 +54,22 @@ impl PipelineGpuState {
     /// # Errors
     /// - `PRCTError::GpuError` if device initialization fails
     pub fn new(device_id: usize, num_streams: usize, mode: StreamMode) -> Result<Self> {
-        // CudaDevice::new() returns Arc<CudaDevice>, don't double-wrap
-        let device = CudaDevice::new(device_id).map_err(|e| {
+        // CudaContext::new() returns Arc<CudaContext>, don't double-wrap
+        let context = CudaContext::new(device_id).map_err(|e| {
             PRCTError::GpuError(format!(
                 "Failed to initialize CUDA device {}: {}",
                 device_id, e
             ))
         })?;
 
-        let stream_pool = CudaStreamPool::new(&device, num_streams)?;
+        let stream_pool = CudaStreamPool::new(&context, num_streams)?;
         let stream_pool = Arc::new(stream_pool);
 
-        let event_registry = EventRegistry::new(device.clone());
+        let event_registry = EventRegistry::new(context.clone());
         let event_registry = Arc::new(event_registry);
 
         Ok(Self {
-            device,
+            context,
             stream_pool,
             event_registry,
             mode,
@@ -78,7 +78,7 @@ impl PipelineGpuState {
 
     /// Get shared device
     pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+        &self.context
     }
 
     /// Get stream pool

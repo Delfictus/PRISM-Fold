@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use shared_types::*;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 #[cfg(feature = "cuda")]
 use std::sync::Arc;
 
@@ -122,7 +122,7 @@ impl MemeticColoringSolver {
     }
 
     #[cfg(feature = "cuda")]
-    pub fn with_gpu(mut self, device: Arc<CudaDevice>) -> Self {
+    pub fn with_gpu(mut self, context: Arc<CudaContext>) -> Self {
         self.gpu_device = Some(device);
         self
     }

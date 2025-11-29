@@ -11,7 +11,7 @@ use shared_types::*;
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 
 #[cfg(feature = "cuda")]
 use crate::gpu_quantum::GpuQuantumSolver;
@@ -19,7 +19,7 @@ use crate::gpu_quantum::GpuQuantumSolver;
 /// Quantum adapter using Hamiltonian evolution
 pub struct QuantumAdapter {
     #[cfg(feature = "cuda")]
-    _cuda_device: Option<Arc<CudaDevice>>,
+    _cuda_device: Option<Arc<CudaContext>>,
     #[cfg(feature = "cuda")]
     gpu_solver: Option<GpuQuantumSolver>,
 }
@@ -27,7 +27,7 @@ pub struct QuantumAdapter {
 impl QuantumAdapter {
     /// Create new quantum adapter with optional GPU acceleration
     #[cfg(feature = "cuda")]
-    pub fn new(cuda_device: Option<Arc<CudaDevice>>) -> Result<Self> {
+    pub fn new(cuda_device: Option<Arc<CudaContext>>) -> Result<Self> {
         let gpu_solver =
             cuda_device
                 .as_ref()

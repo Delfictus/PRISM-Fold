@@ -1,13 +1,19 @@
 //! GPU helpers for PRISM-LBS geometry and clustering.
 
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaStream, CudaFunction, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use prism_core::PrismError;
 use std::path::Path;
 use std::sync::Arc;
 
 /// GPU executor for LBS kernels (surface accessibility, distance matrix, clustering, scoring).
 pub struct LbsGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
+    surface_func: CudaFunction,
+    distance_func: CudaFunction,
+    clustering_func: CudaFunction,
+    scoring_func: CudaFunction,
 }
 
 impl LbsGpu {
@@ -16,57 +22,53 @@ impl LbsGpu {
     /// - lbs_distance_matrix.ptx with `distance_matrix_kernel`
     /// - lbs_pocket_clustering.ptx with `pocket_clustering_kernel`
     /// - lbs_druggability_scoring.ptx with `druggability_score_kernel`
-    pub fn new(device: Arc<CudaDevice>, ptx_dir: &Path) -> Result<Self, PrismError> {
+    pub fn new(context: Arc<CudaContext>, ptx_dir: &Path) -> Result<Self, PrismError> {
+        let stream = context.default_stream();
+
+        // Load surface accessibility module
         let path = ptx_dir.join("lbs_surface_accessibility.ptx");
-        let ptx = cudarc::nvrtc::Ptx::from_file(&path);
-        device
-            .load_ptx(
-                ptx,
-                "lbs_surface_accessibility",
-                &["surface_accessibility_kernel"],
-            )
-            .map_err(|e| {
-                PrismError::gpu(
-                    "lbs_surface_accessibility",
-                    format!("Failed to load PTX: {}", e),
-                )
-            })?;
+        let ptx_src = std::fs::read_to_string(&path)
+            .map_err(|e| PrismError::gpu("lbs_surface_accessibility", format!("Failed to read PTX: {}", e)))?;
+        let surface_module = context.load_module(Ptx::from_src(ptx_src))
+            .map_err(|e| PrismError::gpu("lbs_surface_accessibility", format!("Failed to load PTX: {}", e)))?;
+        let surface_func = surface_module.load_function("surface_accessibility_kernel")
+            .map_err(|e| PrismError::gpu("lbs_surface_accessibility", format!("Failed to load kernel: {}", e)))?;
 
+        // Load distance matrix module
         let path = ptx_dir.join("lbs_distance_matrix.ptx");
-        let ptx = cudarc::nvrtc::Ptx::from_file(&path);
-        device
-            .load_ptx(ptx, "lbs_distance_matrix", &["distance_matrix_kernel"])
-            .map_err(|e| {
-                PrismError::gpu("lbs_distance_matrix", format!("Failed to load PTX: {}", e))
-            })?;
+        let ptx_src = std::fs::read_to_string(&path)
+            .map_err(|e| PrismError::gpu("lbs_distance_matrix", format!("Failed to read PTX: {}", e)))?;
+        let distance_module = context.load_module(Ptx::from_src(ptx_src))
+            .map_err(|e| PrismError::gpu("lbs_distance_matrix", format!("Failed to load PTX: {}", e)))?;
+        let distance_func = distance_module.load_function("distance_matrix_kernel")
+            .map_err(|e| PrismError::gpu("lbs_distance_matrix", format!("Failed to load kernel: {}", e)))?;
 
+        // Load pocket clustering module
         let path = ptx_dir.join("lbs_pocket_clustering.ptx");
-        let ptx = cudarc::nvrtc::Ptx::from_file(&path);
-        device
-            .load_ptx(ptx, "lbs_pocket_clustering", &["pocket_clustering_kernel"])
-            .map_err(|e| {
-                PrismError::gpu(
-                    "lbs_pocket_clustering",
-                    format!("Failed to load PTX: {}", e),
-                )
-            })?;
+        let ptx_src = std::fs::read_to_string(&path)
+            .map_err(|e| PrismError::gpu("lbs_pocket_clustering", format!("Failed to read PTX: {}", e)))?;
+        let clustering_module = context.load_module(Ptx::from_src(ptx_src))
+            .map_err(|e| PrismError::gpu("lbs_pocket_clustering", format!("Failed to load PTX: {}", e)))?;
+        let clustering_func = clustering_module.load_function("pocket_clustering_kernel")
+            .map_err(|e| PrismError::gpu("lbs_pocket_clustering", format!("Failed to load kernel: {}", e)))?;
 
+        // Load druggability scoring module
         let path = ptx_dir.join("lbs_druggability_scoring.ptx");
-        let ptx = cudarc::nvrtc::Ptx::from_file(&path);
-        device
-            .load_ptx(
-                ptx,
-                "lbs_druggability_scoring",
-                &["druggability_score_kernel"],
-            )
-            .map_err(|e| {
-                PrismError::gpu(
-                    "lbs_druggability_scoring",
-                    format!("Failed to load PTX: {}", e),
-                )
-            })?;
+        let ptx_src = std::fs::read_to_string(&path)
+            .map_err(|e| PrismError::gpu("lbs_druggability_scoring", format!("Failed to read PTX: {}", e)))?;
+        let scoring_module = context.load_module(Ptx::from_src(ptx_src))
+            .map_err(|e| PrismError::gpu("lbs_druggability_scoring", format!("Failed to load PTX: {}", e)))?;
+        let scoring_func = scoring_module.load_function("druggability_score_kernel")
+            .map_err(|e| PrismError::gpu("lbs_druggability_scoring", format!("Failed to load kernel: {}", e)))?;
 
-        Ok(Self { device })
+        Ok(Self {
+            context,
+            stream,
+            surface_func,
+            distance_func,
+            clustering_func,
+            scoring_func,
+        })
     }
 
     /// Compute SASA and surface flags for atoms.
@@ -88,62 +90,39 @@ impl LbsGpu {
         let y: Vec<f32> = coords.iter().map(|c| c[1]).collect();
         let z: Vec<f32> = coords.iter().map(|c| c[2]).collect();
 
-        let d_x = self
-            .device
-            .htod_copy(x)
+        let d_x = self.stream.clone_htod(&x)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let d_y = self
-            .device
-            .htod_copy(y)
+        let d_y = self.stream.clone_htod(&y)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let d_z = self
-            .device
-            .htod_copy(z)
+        let d_z = self.stream.clone_htod(&z)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let d_r = self
-            .device
-            .htod_copy(radii.to_vec())
+        let d_r = self.stream.clone_htod(radii)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let mut d_sasa = self
-            .device
-            .alloc_zeros::<f32>(n)
+        let mut d_sasa = self.stream.alloc_zeros::<f32>(n)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let mut d_surface = self
-            .device
-            .alloc_zeros::<u8>(n)
+        let mut d_surface = self.stream.alloc_zeros::<u8>(n)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
 
         let cfg = LaunchConfig::for_num_elems(n as u32);
-        let kernel: CudaFunction = self
-            .device
-            .get_func("lbs_surface_accessibility", "surface_accessibility_kernel")
-            .ok_or_else(|| PrismError::gpu("lbs_surface_accessibility", "kernel not found"))?;
         unsafe {
-            kernel
-                .launch(
-                    cfg,
-                    (
-                        &d_x,
-                        &d_y,
-                        &d_z,
-                        &d_r,
-                        n as i32,
-                        samples,
-                        probe_radius,
-                        &mut d_sasa,
-                        &mut d_surface,
-                    ),
-                )
+            self.stream
+                .launch_builder(&self.surface_func)
+                .arg(&d_x)
+                .arg(&d_y)
+                .arg(&d_z)
+                .arg(&d_r)
+                .arg(&(n as i32))
+                .arg(&samples)
+                .arg(&probe_radius)
+                .arg(&mut d_sasa)
+                .arg(&mut d_surface)
+                .launch(cfg)
                 .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
         }
 
-        let sasa = self
-            .device
-            .dtoh_sync_copy(&d_sasa)
+        let sasa = self.stream.clone_dtoh(&d_sasa)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
-        let surface = self
-            .device
-            .dtoh_sync_copy(&d_surface)
+        let surface = self.stream.clone_dtoh(&d_surface)
             .map_err(|e| PrismError::gpu("lbs_surface_accessibility", e.to_string()))?;
         Ok((sasa, surface))
     }
@@ -154,21 +133,14 @@ impl LbsGpu {
         let x: Vec<f32> = coords.iter().map(|c| c[0]).collect();
         let y: Vec<f32> = coords.iter().map(|c| c[1]).collect();
         let z: Vec<f32> = coords.iter().map(|c| c[2]).collect();
-        let d_x = self
-            .device
-            .htod_copy(x)
+
+        let d_x = self.stream.clone_htod(&x)
             .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?;
-        let d_y = self
-            .device
-            .htod_copy(y)
+        let d_y = self.stream.clone_htod(&y)
             .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?;
-        let d_z = self
-            .device
-            .htod_copy(z)
+        let d_z = self.stream.clone_htod(&z)
             .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?;
-        let mut d_out = self
-            .device
-            .alloc_zeros::<f32>(n * n)
+        let mut d_out = self.stream.alloc_zeros::<f32>(n * n)
             .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?;
 
         let block = (16, 16, 1);
@@ -182,18 +154,20 @@ impl LbsGpu {
             block_dim: block,
             shared_mem_bytes: 0,
         };
-        let kernel: CudaFunction = self
-            .device
-            .get_func("lbs_distance_matrix", "distance_matrix_kernel")
-            .ok_or_else(|| PrismError::gpu("lbs_distance_matrix", "kernel not found"))?;
+
         unsafe {
-            kernel
-                .launch(cfg, (&d_x, &d_y, &d_z, n as i32, &mut d_out))
+            self.stream
+                .launch_builder(&self.distance_func)
+                .arg(&d_x)
+                .arg(&d_y)
+                .arg(&d_z)
+                .arg(&(n as i32))
+                .arg(&mut d_out)
+                .launch(cfg)
                 .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?;
         }
-        Ok(self
-            .device
-            .dtoh_sync_copy(&d_out)
+
+        Ok(self.stream.clone_dtoh(&d_out)
             .map_err(|e| PrismError::gpu("lbs_distance_matrix", e.to_string()))?)
     }
 
@@ -205,32 +179,27 @@ impl LbsGpu {
         max_colors: i32,
     ) -> Result<Vec<i32>, PrismError> {
         let n = row_ptr.len().saturating_sub(1);
-        let d_row = self
-            .device
-            .htod_copy(row_ptr.to_vec())
+        let d_row = self.stream.clone_htod(row_ptr)
             .map_err(|e| PrismError::gpu("lbs_pocket_clustering", e.to_string()))?;
-        let d_col = self
-            .device
-            .htod_copy(col_idx.to_vec())
+        let d_col = self.stream.clone_htod(col_idx)
             .map_err(|e| PrismError::gpu("lbs_pocket_clustering", e.to_string()))?;
-        let mut d_colors = self
-            .device
-            .alloc_zeros::<i32>(n)
+        let mut d_colors = self.stream.alloc_zeros::<i32>(n)
             .map_err(|e| PrismError::gpu("lbs_pocket_clustering", e.to_string()))?;
 
         let cfg = LaunchConfig::for_num_elems(n as u32);
-        let kernel: CudaFunction = self
-            .device
-            .get_func("lbs_pocket_clustering", "pocket_clustering_kernel")
-            .ok_or_else(|| PrismError::gpu("lbs_pocket_clustering", "kernel not found"))?;
         unsafe {
-            kernel
-                .launch(cfg, (&d_row, &d_col, n as i32, max_colors, &mut d_colors))
+            self.stream
+                .launch_builder(&self.clustering_func)
+                .arg(&d_row)
+                .arg(&d_col)
+                .arg(&(n as i32))
+                .arg(&max_colors)
+                .arg(&mut d_colors)
+                .launch(cfg)
                 .map_err(|e| PrismError::gpu("lbs_pocket_clustering", e.to_string()))?;
         }
-        Ok(self
-            .device
-            .dtoh_sync_copy(&d_colors)
+
+        Ok(self.stream.clone_dtoh(&d_colors)
             .map_err(|e| PrismError::gpu("lbs_pocket_clustering", e.to_string()))?)
     }
 
@@ -264,75 +233,47 @@ impl LbsGpu {
             ));
         }
 
-        let d_volume = self
-            .device
-            .htod_copy(volume.to_vec())
+        let d_volume = self.stream.clone_htod(volume)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_hydro = self
-            .device
-            .htod_copy(hydrophobicity.to_vec())
+        let d_hydro = self.stream.clone_htod(hydrophobicity)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_enclosure = self
-            .device
-            .htod_copy(enclosure.to_vec())
+        let d_enclosure = self.stream.clone_htod(enclosure)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_depth = self
-            .device
-            .htod_copy(depth.to_vec())
+        let d_depth = self.stream.clone_htod(depth)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_hbond = self
-            .device
-            .htod_copy(hbond.to_vec())
+        let d_hbond = self.stream.clone_htod(hbond)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_flex = self
-            .device
-            .htod_copy(flexibility.to_vec())
+        let d_flex = self.stream.clone_htod(flexibility)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_cons = self
-            .device
-            .htod_copy(conservation.to_vec())
+        let d_cons = self.stream.clone_htod(conservation)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_topo = self
-            .device
-            .htod_copy(topology.to_vec())
+        let d_topo = self.stream.clone_htod(topology)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let d_weights = self
-            .device
-            .htod_copy(weights.to_vec())
+        let d_weights = self.stream.clone_htod(&weights)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
-        let mut d_out = self
-            .device
-            .alloc_zeros::<f32>(n)
+        let mut d_out = self.stream.alloc_zeros::<f32>(n)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
 
         let cfg = LaunchConfig::for_num_elems(n as u32);
-        let kernel: CudaFunction = self
-            .device
-            .get_func("lbs_druggability_scoring", "druggability_score_kernel")
-            .ok_or_else(|| PrismError::gpu("lbs_druggability_scoring", "kernel not found"))?;
         unsafe {
-            kernel
-                .launch(
-                    cfg,
-                    (
-                        &d_volume,
-                        &d_hydro,
-                        &d_enclosure,
-                        &d_depth,
-                        &d_hbond,
-                        &d_flex,
-                        &d_cons,
-                        &d_topo,
-                        &d_weights,
-                        n as i32,
-                        &mut d_out,
-                    ),
-                )
+            self.stream
+                .launch_builder(&self.scoring_func)
+                .arg(&d_volume)
+                .arg(&d_hydro)
+                .arg(&d_enclosure)
+                .arg(&d_depth)
+                .arg(&d_hbond)
+                .arg(&d_flex)
+                .arg(&d_cons)
+                .arg(&d_topo)
+                .arg(&d_weights)
+                .arg(&(n as i32))
+                .arg(&mut d_out)
+                .launch(cfg)
                 .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?;
         }
-        Ok(self
-            .device
-            .dtoh_sync_copy(&d_out)
+
+        Ok(self.stream.clone_dtoh(&d_out)
             .map_err(|e| PrismError::gpu("lbs_druggability_scoring", e.to_string()))?)
     }
 }

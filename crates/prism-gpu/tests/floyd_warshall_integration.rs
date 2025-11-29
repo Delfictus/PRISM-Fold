@@ -15,7 +15,7 @@
 //!
 //! REFERENCE: PRISM GPU Plan §4.4 (Phase 4 APSP Testing)
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_gpu::FloydWarshallGpu;
 use std::sync::Arc;
 
@@ -89,7 +89,7 @@ fn assert_distances_equal(gpu: &[Vec<f32>], cpu: &[Vec<f32>], tolerance: f32) {
 fn test_small_directed_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -134,7 +134,7 @@ fn test_small_directed_graph() {
 fn test_complete_graph_k5() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -177,7 +177,7 @@ fn test_complete_graph_k5() {
 fn test_path_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -212,7 +212,7 @@ fn test_path_graph() {
 fn test_disconnected_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -250,7 +250,7 @@ fn test_disconnected_graph() {
 fn test_medium_random_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -299,7 +299,7 @@ fn test_medium_random_graph() {
 fn benchmark_large_graph_500() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -355,7 +355,7 @@ fn benchmark_large_graph_500() {
 fn test_single_vertex() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 
@@ -374,7 +374,7 @@ fn test_single_vertex() {
 fn test_two_isolated_vertices() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
         .expect("Failed to create FloydWarshallGpu");
 

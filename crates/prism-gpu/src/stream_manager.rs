@@ -8,7 +8,7 @@
 //! - AsyncPipelineCoordinator for overlapping config upload, kernel execution, and telemetry download
 
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 use prism_core::{KernelTelemetry, RuntimeConfig};
@@ -44,7 +44,7 @@ pub struct ManagedStream {
 /// Streams can be acquired by purpose and synchronized independently.
 pub struct StreamPool {
     /// CUDA device context
-    ctx: Arc<CudaDevice>,
+    ctx: Arc<CudaContext>,
     /// Managed streams
     streams: Vec<ManagedStream>,
 }
@@ -54,12 +54,12 @@ impl StreamPool {
     ///
     /// # Example
     /// ```no_run
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use prism_gpu::stream_manager::StreamPool;
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let pool = StreamPool::new(device).unwrap();
     /// ```
-    pub fn new(ctx: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(ctx: Arc<CudaContext>) -> Result<Self> {
         let mut streams = Vec::new();
 
         // Create one stream for each purpose
@@ -159,7 +159,7 @@ impl StreamPool {
     }
 
     /// Get device context
-    pub fn device(&self) -> &Arc<CudaDevice> {
+    pub fn device(&self) -> &Arc<CudaContext> {
         &self.ctx
     }
 }
@@ -280,12 +280,12 @@ impl AsyncPipelineCoordinator {
     ///
     /// # Example
     /// ```no_run
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use prism_gpu::stream_manager::AsyncPipelineCoordinator;
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let coordinator = AsyncPipelineCoordinator::new(device).unwrap();
     /// ```
-    pub fn new(ctx: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(ctx: Arc<CudaContext>) -> Result<Self> {
         Ok(Self {
             streams: StreamPool::new(ctx)?,
             config_buffer: TripleBuffer::new(),

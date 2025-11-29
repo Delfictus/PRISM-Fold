@@ -5,7 +5,7 @@
 //!
 //! Run with: cargo test -p prism-phases --features cuda -- --ignored
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_core::{Graph, PhaseContext};
 use prism_phases::phase3_quantum::Phase3Quantum;
 use std::sync::Arc;
@@ -143,7 +143,7 @@ fn test_phase3_cpu_fallback_bipartite() {
 fn test_phase3_gpu_triangle() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let mut phase3 = Phase3Quantum::with_gpu(Arc::new(device), "target/ptx/quantum.ptx")
         .expect("Failed to initialize GPU phase");
 
@@ -179,7 +179,7 @@ fn test_phase3_gpu_triangle() {
 fn test_phase3_gpu_k5() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let mut phase3 = Phase3Quantum::with_gpu(Arc::new(device), "target/ptx/quantum.ptx")
         .expect("Failed to initialize GPU phase");
 
@@ -213,7 +213,7 @@ fn test_phase3_gpu_vs_cpu_consistency() {
     let cpu_solution = context_cpu.best_solution.unwrap();
 
     // Run GPU version
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let mut phase3_gpu = Phase3Quantum::with_gpu(Arc::new(device), "target/ptx/quantum.ptx")
         .expect("Failed to initialize GPU phase");
 
@@ -262,7 +262,7 @@ fn test_phase3_performance_dsjc125() {
     // This test is for performance benchmarking
     // Target: < 500ms for DSJC125
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let mut phase3 = Phase3Quantum::with_gpu(Arc::new(device), "target/ptx/quantum.ptx")
         .expect("Failed to initialize GPU phase");
 

@@ -37,7 +37,8 @@
 //! REFERENCE: PRISM GPU Plan §4.1 (Phase 0 Dendritic Reservoir Kernel)
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaSlice, CudaStream, CudaFunction, CudaModule, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// Maximum supported graph size (enforced at runtime)
@@ -61,10 +62,18 @@ const BLOCK_SIZE: usize = 256;
 /// GPU-accelerated dendritic reservoir for Phase 0 warmstart
 ///
 /// Maintains CUDA device context and compiled PTX module.
-/// Thread-safe via Arc<CudaDevice>.
+/// Thread-safe via Arc<CudaContext>.
 pub struct DendriticReservoirGpu {
     /// CUDA device handle
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    /// CUDA stream
+    stream: Arc<CudaStream>,
+    /// PTX module
+    _module: Arc<CudaModule>,
+    /// Kernel functions
+    init_reservoir: CudaFunction,
+    propagate_dendritic: CudaFunction,
+    compute_metrics_combined: CudaFunction,
     /// Number of dendritic branches per vertex
     num_branches: usize,
     /// Leak rate for temporal dynamics [0, 1]
@@ -88,41 +97,40 @@ impl DendriticReservoirGpu {
     ///
     /// # Example
     /// ```rust,no_run
-    /// use cudarc::driver::CudaDevice;
+    /// use cudarc::driver::CudaContext;
     /// use prism_gpu::dendritic_reservoir::DendriticReservoirGpu;
     /// use std::sync::Arc;
     ///
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let reservoir = DendriticReservoirGpu::new(
     ///     Arc::new(device),
     ///     "kernels/dendritic_reservoir.ptx"
     /// ).unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         log::info!("Loading Dendritic Reservoir PTX module from: {}", ptx_path);
 
-        // Load PTX module
-        let ptx_str = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read PTX file: {}", ptx_path))?;
+        let stream = context.default_stream();
 
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "dendritic_reservoir",
-                &[
-                    "init_reservoir",
-                    "propagate_dendritic",
-                    "compute_difficulty",
-                    "compute_uncertainty",
-                    "compute_metrics_combined",
-                ],
-            )
+        // Load PTX module
+        let module = context
+            .load_module(Ptx::from_file(ptx_path))
             .context("Failed to load Dendritic Reservoir PTX module")?;
+
+        // Load kernel functions
+        let init_reservoir = module.load_function("init_reservoir")?;
+        let propagate_dendritic = module.load_function("propagate_dendritic")?;
+        let compute_metrics_combined = module.load_function("compute_metrics_combined")?;
 
         log::info!("Dendritic Reservoir GPU module loaded successfully");
 
         Ok(Self {
-            device,
+            context,
+            stream,
+            _module: module,
+            init_reservoir,
+            propagate_dendritic,
+            compute_metrics_combined,
             num_branches: DEFAULT_BRANCHES,
             leak_rate: DEFAULT_LEAK_RATE,
             iterations: DEFAULT_ITERATIONS,
@@ -143,7 +151,7 @@ impl DendriticReservoirGpu {
     /// - PTX loading fails
     /// - Parameters out of valid range
     pub fn new_with_params(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         ptx_path: &str,
         num_branches: usize,
         leak_rate: f32,
@@ -166,7 +174,7 @@ impl DendriticReservoirGpu {
             iterations
         );
 
-        let mut reservoir = Self::new(device, ptx_path)?;
+        let mut reservoir = Self::new(context, ptx_path)?;
         reservoir.num_branches = num_branches;
         reservoir.leak_rate = leak_rate;
         reservoir.iterations = iterations;
@@ -207,9 +215,9 @@ impl DendriticReservoirGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::dendritic_reservoir::DendriticReservoirGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = CudaDevice::new(0).unwrap();
+    /// # let device = CudaContext::new(0).unwrap();
     /// # let reservoir = DendriticReservoirGpu::new(
     /// #     Arc::new(device),
     /// #     "kernels/dendritic_reservoir.ptx"
@@ -259,22 +267,22 @@ impl DendriticReservoirGpu {
 
         // Allocate state buffers (double-buffered for ping-pong)
         let mut state_a: CudaSlice<f32> = self
-            .device
+            .stream
             .alloc_zeros(state_size)
             .context("Failed to allocate state buffer A")?;
         let mut state_b: CudaSlice<f32> = self
-            .device
+            .stream
             .alloc_zeros(state_size)
             .context("Failed to allocate state buffer B")?;
 
         // Copy CSR data to GPU
         let row_ptr_device: CudaSlice<i32> = self
-            .device
-            .htod_sync_copy(&row_ptr)
+            .stream
+            .clone_htod(&row_ptr)
             .context("Failed to copy row_ptr to GPU")?;
         let col_idx_device: CudaSlice<i32> = self
-            .device
-            .htod_sync_copy(&col_idx)
+            .stream
+            .clone_htod(&col_idx)
             .context("Failed to copy col_idx to GPU")?;
 
         // Step 3: Initialize reservoir state
@@ -362,11 +370,6 @@ impl DendriticReservoirGpu {
 
     /// Initializes reservoir state with random weights
     fn initialize_state(&self, state: &mut CudaSlice<f32>, num_vertices: usize) -> Result<()> {
-        let init_func = self
-            .device
-            .get_func("dendritic_reservoir", "init_reservoir")
-            .context("Failed to get init_reservoir kernel function")?;
-
         let state_size = num_vertices * self.num_branches;
         let grid_dim = (state_size as u32).div_ceil(BLOCK_SIZE as u32);
 
@@ -385,14 +388,16 @@ impl DendriticReservoirGpu {
         log::debug!("Initializing reservoir state with seed={}", seed);
 
         unsafe {
-            init_func.launch(
-                cfg,
-                (state, num_vertices as i32, self.num_branches as i32, seed),
-            )
+            self.stream.launch_builder(&self.init_reservoir)
+                .arg(state)
+                .arg(&(num_vertices as i32))
+                .arg(&(self.num_branches as i32))
+                .arg(&seed)
+                .launch(cfg)
         }
         .context("Failed to launch init_reservoir kernel")?;
 
-        self.device
+        self.context
             .synchronize()
             .context("Initialization synchronization failed")?;
 
@@ -408,11 +413,6 @@ impl DendriticReservoirGpu {
         col_idx: &CudaSlice<i32>,
         num_vertices: usize,
     ) -> Result<()> {
-        let propagate_func = self
-            .device
-            .get_func("dendritic_reservoir", "propagate_dendritic")
-            .context("Failed to get propagate_dendritic kernel function")?;
-
         let grid_dim = (num_vertices as u32).div_ceil(BLOCK_SIZE as u32);
 
         let cfg = LaunchConfig {
@@ -422,22 +422,19 @@ impl DendriticReservoirGpu {
         };
 
         unsafe {
-            propagate_func.launch(
-                cfg,
-                (
-                    state_out,
-                    state_in,
-                    row_ptr,
-                    col_idx,
-                    num_vertices as i32,
-                    self.num_branches as i32,
-                    self.leak_rate,
-                ),
-            )
+            self.stream.launch_builder(&self.propagate_dendritic)
+                .arg(state_out)
+                .arg(state_in)
+                .arg(row_ptr)
+                .arg(col_idx)
+                .arg(&(num_vertices as i32))
+                .arg(&(self.num_branches as i32))
+                .arg(&self.leak_rate)
+                .launch(cfg)
         }
         .context("Failed to launch propagate_dendritic kernel")?;
 
-        self.device
+        self.context
             .synchronize()
             .context("Propagation synchronization failed")?;
 
@@ -454,19 +451,13 @@ impl DendriticReservoirGpu {
 
         // Allocate output buffers on GPU
         let mut difficulty_device: CudaSlice<f32> = self
-            .device
+            .stream
             .alloc_zeros(num_vertices)
             .context("Failed to allocate difficulty buffer")?;
         let mut uncertainty_device: CudaSlice<f32> = self
-            .device
+            .stream
             .alloc_zeros(num_vertices)
             .context("Failed to allocate uncertainty buffer")?;
-
-        // Use combined kernel for efficiency
-        let metrics_func = self
-            .device
-            .get_func("dendritic_reservoir", "compute_metrics_combined")
-            .context("Failed to get compute_metrics_combined kernel function")?;
 
         let grid_dim = (num_vertices as u32).div_ceil(BLOCK_SIZE as u32);
 
@@ -477,40 +468,37 @@ impl DendriticReservoirGpu {
         };
 
         unsafe {
-            metrics_func.launch(
-                cfg,
-                (
-                    state,
-                    &mut difficulty_device,
-                    &mut uncertainty_device,
-                    num_vertices as i32,
-                    self.num_branches as i32,
-                ),
-            )
+            self.stream.launch_builder(&self.compute_metrics_combined)
+                .arg(state)
+                .arg(&mut difficulty_device)
+                .arg(&mut uncertainty_device)
+                .arg(&(num_vertices as i32))
+                .arg(&(self.num_branches as i32))
+                .launch(cfg)
         }
         .context("Failed to launch compute_metrics_combined kernel")?;
 
-        self.device
+        self.context
             .synchronize()
             .context("Metrics computation synchronization failed")?;
 
         // Copy results back to host
         log::debug!("Copying metrics back to host");
         let difficulty = self
-            .device
-            .dtoh_sync_copy(&difficulty_device)
+            .stream
+            .clone_dtoh(&difficulty_device)
             .context("Failed to copy difficulty from GPU")?;
         let uncertainty = self
-            .device
-            .dtoh_sync_copy(&uncertainty_device)
+            .stream
+            .clone_dtoh(&uncertainty_device)
             .context("Failed to copy uncertainty from GPU")?;
 
         Ok((difficulty, uncertainty))
     }
 
     /// Returns reference to underlying CUDA device
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Returns number of dendritic branches
@@ -551,7 +539,7 @@ mod tests {
     fn test_dendritic_reservoir_small_graph() {
         env_logger::builder().is_test(true).try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let reservoir =
             DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
                 .expect("Failed to create DendriticReservoirGpu");
@@ -596,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_validation_max_vertices() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let reservoir =
             DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
                 .expect("Failed to create DendriticReservoirGpu");
@@ -610,7 +598,7 @@ mod tests {
 
     #[test]
     fn test_validation_empty_graph() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let reservoir =
             DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
                 .expect("Failed to create DendriticReservoirGpu");
@@ -621,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_validation_custom_params() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
 
         // Valid parameters
         let result = DendriticReservoirGpu::new_with_params(

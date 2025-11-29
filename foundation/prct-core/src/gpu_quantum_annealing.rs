@@ -97,7 +97,7 @@ impl CsrMatrix {
 
 /// GPU QUBO Simulated Annealing Solver
 pub struct GpuQuboSolver {
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     energy_kernel: Arc<CudaFunction>,
     flip_kernel: Arc<CudaFunction>,
     metropolis_kernel: Arc<CudaFunction>,
@@ -106,7 +106,7 @@ pub struct GpuQuboSolver {
 
 impl GpuQuboSolver {
     /// Initialize GPU QUBO solver with loaded kernels
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>) -> Result<Self> {
         // Load PTX module
         let ptx_path = std::env::var("PRISM_QUANTUM_PTX")
             .unwrap_or_else(|_| "foundation/kernels/quantum_evolution.ptx".to_string());
@@ -164,6 +164,7 @@ impl GpuQuboSolver {
         initial_state: &[bool],
         config: &GpuQuboConfig,
     ) -> Result<Vec<bool>> {
+        let stream = context.default_stream();
         let num_vars = qubo.num_variables();
 
         if initial_state.len() != num_vars {
@@ -435,7 +436,7 @@ pub fn qubo_solution_to_coloring(
 
 /// Main entry point for GPU QUBO simulated annealing
 pub fn gpu_qubo_simulated_annealing(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     qubo: &SparseQUBO,
     initial_state: &[bool],
     iterations: usize,

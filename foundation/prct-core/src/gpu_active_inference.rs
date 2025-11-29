@@ -4,7 +4,7 @@
 //! Phase 1 of the PRISM world-record pipeline.
 //!
 //! Constitutional Compliance:
-//! - Article V: Uses shared CUDA context (Arc<CudaDevice>)
+//! - Article V: Uses shared CUDA context (Arc<CudaContext>)
 //! - Article VII: Kernels compiled in build.rs (active_inference.cu)
 //! - Zero stubs: Full implementation, no todo!/unimplemented!
 
@@ -51,11 +51,12 @@ pub struct ActiveInferencePolicyGpu {
 /// Active inference policy with expected free energy for each vertex
 #[cfg(feature = "cuda")]
 pub fn active_inference_policy_gpu(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     graph: &Graph,
     coloring: &[usize],
     kuramoto_state: &KuramotoState,
 ) -> Result<ActiveInferencePolicyGpu> {
+    let stream = context.default_stream();
     let n = graph.num_vertices;
 
     println!(
@@ -295,7 +296,7 @@ fn compute_observations(
 /// CPU fallback for active inference policy (when CUDA not compiled)
 #[cfg(not(feature = "cuda"))]
 pub fn active_inference_policy_gpu(
-    _cuda_device: &Arc<CudaDevice>,
+    _cuda_device: &Arc<CudaContext>,
     graph: &Graph,
     coloring: &[usize],
     kuramoto_state: &KuramotoState,

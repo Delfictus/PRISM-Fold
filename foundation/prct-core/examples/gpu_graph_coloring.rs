@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(feature = "cuda")]
     {
-        match cudarc::driver::CudaDevice::new(0) {
+        match cudarc::driver::CudaContext::new(0) {
             Ok(device) => {
                 println!("   ✅ GPU detected");
 

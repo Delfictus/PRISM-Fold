@@ -11,7 +11,7 @@
 
 use crate::errors::*;
 use crate::sparse_qubo::SparseQUBO;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use shared_types::{ColoringSolution, Graph};
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// regions of the solution space via different random seeds.
 ///
 /// # Arguments
-/// * `devices` - Array of CUDA devices (from MultiGpuDevicePool)
+/// * `devices` - Array of CUDA contexts (from MultiGpuDevicePool)
 /// * `qubo` - Sparse QUBO problem formulation
 /// * `initial_state` - Starting bit assignment
 /// * `total_attempts` - Total number of annealing attempts (distributed across GPUs)
@@ -34,7 +34,7 @@ use std::sync::Arc;
 /// Best bit assignment found across all GPUs
 #[allow(clippy::too_many_arguments)]
 pub fn quantum_annealing_multi_gpu(
-    devices: &[Arc<CudaDevice>],
+    devices: &[Arc<CudaContext>],
     qubo: &SparseQUBO,
     initial_state: &[bool],
     total_attempts: usize,
@@ -71,8 +71,8 @@ pub fn quantum_annealing_multi_gpu(
     let qubo_owned = qubo.clone();
 
     // Launch quantum annealing on each GPU in parallel
-    let handles: Vec<_> = devices.iter().enumerate().map(|(gpu_idx, device)| {
-        let device = device.clone();
+    let handles: Vec<_> = devices.iter().enumerate().map(|(gpu_idx, context)| {
+        let context = context.clone();
         let qubo = qubo_owned.clone();
         let initial_state = initial_state.to_vec();
         let base_seed = seed + (gpu_idx as u64 * 1_000_000);  // Large offset per GPU
@@ -93,7 +93,7 @@ pub fn quantum_annealing_multi_gpu(
 
                 // Run GPU QUBO simulated annealing
                 match crate::gpu_quantum_annealing::gpu_qubo_simulated_annealing(
-                    &device,
+                    &context,
                     &qubo,
                     &initial_state,
                     depth * 1000,  // iterations = depth * 1000

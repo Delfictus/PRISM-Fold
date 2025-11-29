@@ -11,7 +11,7 @@ use prism_gpu::{MDParams, MolecularDynamicsGpu};
 #[ignore] // Run with: cargo test md_convergence --ignored --features cuda
 fn test_md_energy_conservation() {
     // Initialize CUDA device
-    let device = cudarc::driver::CudaDevice::new(0).expect("Failed to init CUDA device");
+    let device = cudarc::driver::CudaContext::new(0).expect("Failed to init CUDA device");
 
     // Create MD executor
     let mut md_gpu = MolecularDynamicsGpu::new(
@@ -95,7 +95,7 @@ fn test_md_energy_conservation() {
 #[ignore]
 fn test_md_thermostat_equilibration() {
     // Test that thermostat brings system to target temperature
-    let device = cudarc::driver::CudaDevice::new(0).expect("Failed to init CUDA device");
+    let device = cudarc::driver::CudaContext::new(0).expect("Failed to init CUDA device");
 
     let mut md_gpu = MolecularDynamicsGpu::new(
         std::sync::Arc::new(device),

@@ -16,7 +16,7 @@
 //!
 //! REFERENCE: PRISM GPU Plan §4.1 (Phase 0 Dendritic Reservoir Testing)
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_gpu::DendriticReservoirGpu;
 use std::sync::Arc;
 
@@ -164,7 +164,7 @@ fn assert_metrics_correlation(
 fn test_complete_graph_k5() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");
@@ -222,7 +222,7 @@ fn test_complete_graph_k5() {
 fn test_star_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");
@@ -284,7 +284,7 @@ fn test_star_graph() {
 fn test_path_graph() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");
@@ -330,7 +330,7 @@ fn test_path_graph() {
 fn test_isolated_vertex() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");
@@ -385,7 +385,7 @@ fn test_isolated_vertex() {
 fn test_cpu_gpu_correlation() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");
@@ -429,7 +429,7 @@ fn test_cpu_gpu_correlation() {
 fn test_custom_parameters() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
 
     // Test with 16 branches, leak rate 0.2, 100 iterations
     let reservoir = DendriticReservoirGpu::new_with_params(
@@ -480,7 +480,7 @@ fn test_custom_parameters() {
 fn benchmark_dsjc250_like() {
     env_logger::builder().is_test(true).try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA device not available");
+    let device = CudaContext::new(0).expect("CUDA device not available");
     let reservoir =
         DendriticReservoirGpu::new(Arc::new(device), "target/ptx/dendritic_reservoir.ptx")
             .expect("Failed to create DendriticReservoirGpu");

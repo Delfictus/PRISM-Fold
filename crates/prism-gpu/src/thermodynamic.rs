@@ -5,7 +5,8 @@
 //!
 //! Implements §4.2 (Phase 2: Thermodynamic) of the PRISM GPU Plan.
 
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaStream, CudaFunction, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -33,10 +34,10 @@ pub enum ThermodynamicError {
 ///
 /// ```ignore
 /// use prism_gpu::ThermodynamicGpu;
-/// use cudarc::driver::CudaDevice;
+/// use cudarc::driver::CudaContext;
 /// use std::sync::Arc;
 ///
-/// let device = Arc::new(CudaDevice::new(0)?);
+/// let device = Arc::new(CudaContext::new(0)?);
 /// let thermo = ThermodynamicGpu::new(device, "target/ptx/thermodynamic.ptx")?;
 ///
 /// let adjacency = vec![vec![1, 2], vec![0, 2], vec![0, 1]]; // Triangle
@@ -45,7 +46,8 @@ pub enum ThermodynamicError {
 /// let result = thermo.run(&adjacency, 3, &initial, 4, 1000, 0.01, 5.0)?;
 /// ```
 pub struct ThermodynamicGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
     kernel_anneal: CudaFunction,
     kernel_swap_replicas: CudaFunction,
 }
@@ -59,36 +61,24 @@ impl ThermodynamicGpu {
     ///
     /// # Errors
     /// Returns error if PTX loading fails or kernels are not found.
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self, ThermodynamicError> {
+    pub fn new(device: Arc<CudaContext>, ptx_path: &str) -> Result<Self, ThermodynamicError> {
         log::info!("Loading Thermodynamic PTX module from: {}", ptx_path);
 
-        let ptx_str = std::fs::read_to_string(ptx_path)
-            .map_err(|e| ThermodynamicError::PTXLoadFailed(format!("Failed to read PTX: {}", e)))?;
+        let stream = device.default_stream();
 
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "thermodynamic",
-                &["parallel_tempering_step", "replica_swap"],
-            )
-            .map_err(|e| {
-                ThermodynamicError::PTXLoadFailed(format!("Failed to load PTX module: {}", e))
-            })?;
+        let module = device.load_module(Ptx::from_file(ptx_path))?;
 
-        let kernel_anneal = device
-            .get_func("thermodynamic", "parallel_tempering_step")
-            .ok_or_else(|| {
-                ThermodynamicError::KernelNotFound("parallel_tempering_step".to_string())
-            })?;
+        let kernel_anneal = module
+            .load_function("parallel_tempering_step")?;
 
-        let kernel_swap_replicas = device
-            .get_func("thermodynamic", "replica_swap")
-            .ok_or_else(|| ThermodynamicError::KernelNotFound("replica_swap".to_string()))?;
+        let kernel_swap_replicas = module
+            .load_function("replica_swap")?;
 
         log::info!("Thermodynamic GPU module loaded successfully");
 
         Ok(Self {
-            device,
+            context: device,
+            stream,
             kernel_anneal,
             kernel_swap_replicas,
         })
@@ -188,7 +178,7 @@ impl ThermodynamicGpu {
         );
 
         log::info!(
-            "Using default CUDA stream for replica execution (cudarc 0.11)"
+            "Using default CUDA stream for replica execution (cudarc 0.18.1)"
         );
 
         // Convert adjacency list to CSR format
@@ -200,9 +190,9 @@ impl ThermodynamicGpu {
             self.compute_independent_sets(adjacency, num_vertices);
 
         // Allocate device memory for graph structure
-        let d_row_ptr = self.device.htod_sync_copy(&row_ptr)?;
-        let d_col_idx = self.device.htod_sync_copy(&col_idx)?;
-        let d_independent_sets = self.device.htod_sync_copy(&independent_sets)?;
+        let d_row_ptr = self.stream.clone_htod(&row_ptr)?;
+        let d_col_idx = self.stream.clone_htod(&col_idx)?;
+        let d_independent_sets = self.stream.clone_htod(&independent_sets)?;
 
         // Initialize replicas with temperature schedule (geometric progression)
         // Temperature will be dynamically adjusted for simulated annealing
@@ -227,7 +217,7 @@ impl ThermodynamicGpu {
             iterations
         );
 
-        let mut d_temperatures = self.device.htod_sync_copy(&temperatures)?;
+        let mut d_temperatures = self.stream.clone_htod(&temperatures)?;
 
         // Initialize all replicas with the initial coloring
         let mut replica_colors = vec![0u32; num_vertices * num_replicas];
@@ -237,11 +227,11 @@ impl ThermodynamicGpu {
                 replica_colors[offset + v] = initial_colors[v] as u32;
             }
         }
-        let d_replica_colors = self.device.htod_sync_copy(&replica_colors)?;
+        let d_replica_colors = self.stream.clone_htod(&replica_colors)?;
 
         // Allocate conflict counts
         let conflicts = vec![0u32; num_replicas];
-        let d_conflicts = self.device.htod_sync_copy(&conflicts)?;
+        let d_conflicts = self.stream.clone_htod(&conflicts)?;
 
         // Launch configuration
         let total_threads = num_vertices * num_replicas;
@@ -273,7 +263,7 @@ impl ThermodynamicGpu {
                 }
 
                 // Update GPU temperature array
-                d_temperatures = self.device.htod_sync_copy(&temperatures)?;
+                d_temperatures = self.stream.clone_htod(&temperatures)?;
 
                 if iter % 1000 == 0 && iter > 0 {
                     log::debug!(
@@ -296,28 +286,25 @@ impl ThermodynamicGpu {
                     shared_mem_bytes: 0,
                 };
 
-                // Launch kernel on default stream (processes all replicas in one kernel)
+                // Launch kernel on stream (processes all replicas in one kernel)
                 unsafe {
-                    self.kernel_anneal.clone().launch(
-                        config,
-                        (
-                            &d_row_ptr,
-                            &d_col_idx,
-                            &d_replica_colors,
-                            &d_temperatures,
-                            &d_conflicts,
-                            &d_independent_sets,
-                            num_vertices as u32,
-                            num_edges as u32,
-                            num_replicas as u32,
-                            iter as u32,
-                            set_id as u32,
-                        ),
-                    )?;
-                }
+                    self.stream.launch_builder(&self.kernel_anneal)
+                        .arg(&d_row_ptr)
+                        .arg(&d_col_idx)
+                        .arg(&d_replica_colors)
+                        .arg(&d_temperatures)
+                        .arg(&d_conflicts)
+                        .arg(&d_independent_sets)
+                        .arg(&(num_vertices as u32))
+                        .arg(&(num_edges as u32))
+                        .arg(&(num_replicas as u32))
+                        .arg(&(iter as u32))
+                        .arg(&(set_id as u32))
+                        .launch(config)?
+                };
 
                 // Synchronize after each independent set to prevent races
-                self.device.synchronize()?;
+                self.stream.synchronize()?;
             }
 
             // Replica swap every 100 iterations
@@ -328,22 +315,19 @@ impl ThermodynamicGpu {
                     shared_mem_bytes: 0,
                 };
 
-                // Launch replica swap kernel on default stream
+                // Launch replica swap kernel on stream
                 unsafe {
-                    self.kernel_swap_replicas.clone().launch(
-                        swap_config,
-                        (
-                            &d_replica_colors,
-                            &d_temperatures,
-                            &d_conflicts,
-                            num_vertices as u32,
-                            num_replicas as u32,
-                        ),
-                    )?;
-                }
+                    self.stream.launch_builder(&self.kernel_swap_replicas)
+                        .arg(&d_replica_colors)
+                        .arg(&d_temperatures)
+                        .arg(&d_conflicts)
+                        .arg(&(num_vertices as u32))
+                        .arg(&(num_replicas as u32))
+                        .launch(swap_config)?
+                };
 
                 // Synchronize after replica swap
-                self.device.synchronize()?;
+                self.stream.synchronize()?;
             }
 
             if iter % 1000 == 0 && iter > 0 {
@@ -356,11 +340,8 @@ impl ThermodynamicGpu {
         }
 
         // Copy results back
-        self.device
-            .dtoh_sync_copy_into(&d_replica_colors, &mut replica_colors)?;
-        let mut conflicts_host = vec![0u32; num_replicas];
-        self.device
-            .dtoh_sync_copy_into(&d_conflicts, &mut conflicts_host)?;
+        replica_colors = self.stream.clone_dtoh(&d_replica_colors)?;
+        let conflicts_host = self.stream.clone_dtoh(&d_conflicts)?;
 
         // Find best replica (lowest conflicts)
         let best_replica = conflicts_host
@@ -479,7 +460,7 @@ mod tests {
     fn test_thermodynamic_gpu_triangle() {
         env_logger::try_init().ok();
 
-        let device = Arc::new(CudaDevice::new(0).expect("CUDA not available"));
+        let device = Arc::new(CudaContext::new(0).expect("CUDA not available"));
         let thermo =
             ThermodynamicGpu::new(device, "target/ptx/thermodynamic.ptx").expect("GPU init failed");
 
@@ -503,7 +484,7 @@ mod tests {
     fn test_thermodynamic_gpu_petersen() {
         env_logger::try_init().ok();
 
-        let device = Arc::new(CudaDevice::new(0).expect("CUDA not available"));
+        let device = Arc::new(CudaContext::new(0).expect("CUDA not available"));
         let thermo =
             ThermodynamicGpu::new(device, "target/ptx/thermodynamic.ptx").expect("GPU init failed");
 
@@ -553,7 +534,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_adjacency_to_csr() {
-        let device = Arc::new(CudaDevice::new(0).unwrap_or_else(|_| {
+        let device = Arc::new(CudaContext::new(0).unwrap_or_else(|_| {
             panic!("Test requires GPU");
         }));
         let thermo = ThermodynamicGpu::new(device, "target/ptx/thermodynamic.ptx").unwrap();

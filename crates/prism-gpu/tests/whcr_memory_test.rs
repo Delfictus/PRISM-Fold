@@ -3,7 +3,7 @@
 #[cfg(feature = "cuda")]
 #[test]
 fn test_whcr_memory_access() -> anyhow::Result<()> {
-    use cudarc::driver::CudaDevice;
+    use cudarc::driver::CudaContext;
     use prism_gpu::whcr::WhcrGpu;
 
     println!("Testing WHCR with forced conflicts...");
@@ -39,7 +39,7 @@ fn test_whcr_memory_access() -> anyhow::Result<()> {
     assert!(initial_conflicts > 0, "Should have initial conflicts");
 
     // Initialize GPU
-    let device = CudaDevice::new(0)?;
+    let device = CudaContext::new(0)?;
 
     // Create WHCR GPU instance
     let mut whcr = WhcrGpu::new(device, 10, &adjacency)?;

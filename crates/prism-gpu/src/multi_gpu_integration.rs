@@ -32,7 +32,7 @@
 
 use crate::multi_device_pool::{MultiGpuDevicePool, ReplicaExchangeCoordinator};
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 /// Multi-GPU execution context
@@ -66,7 +66,7 @@ pub struct MultiGpuContext {
     replica_coordinator: Option<ReplicaExchangeCoordinator>,
 
     /// Single device fallback
-    single_device: Arc<CudaDevice>,
+    single_device: Arc<CudaContext>,
 
     /// Number of devices in use
     num_devices: usize,
@@ -159,7 +159,7 @@ impl MultiGpuContext {
         // Single GPU fallback
         log::info!("Initializing single-GPU fallback mode (device 0)");
 
-        let single_device = CudaDevice::new(0)?;
+        let single_device = CudaContext::new(0)?;
 
         Ok(Self {
             replica_coordinator: None,
@@ -195,7 +195,7 @@ impl MultiGpuContext {
                 "Single device specified ({}), using single-GPU mode",
                 device_ids[0]
             );
-            let single_device = CudaDevice::new(device_ids[0])?;
+            let single_device = CudaContext::new(device_ids[0])?;
             return Ok(Self {
                 replica_coordinator: None,
                 single_device,
@@ -243,7 +243,7 @@ impl MultiGpuContext {
 
         for device_id in 0..16 {
             // Check up to 16 GPUs (reasonable limit)
-            match CudaDevice::new(device_id) {
+            match CudaContext::new(device_id) {
                 Ok(_) => {
                     count += 1;
                 }
@@ -290,7 +290,7 @@ impl MultiGpuContext {
     /// let device = ctx.primary_device();
     /// // Use device for kernel initialization
     /// ```
-    pub fn primary_device(&self) -> Arc<CudaDevice> {
+    pub fn primary_device(&self) -> Arc<CudaContext> {
         self.replica_coordinator
             .as_ref()
             .map(|c| c.pool().primary_context().clone())
@@ -314,7 +314,7 @@ impl MultiGpuContext {
     /// let ctx = MultiGpuContext::new_auto().unwrap();
     /// let device_1 = ctx.device(1); // Get second GPU
     /// ```
-    pub fn device(&self, idx: usize) -> Arc<CudaDevice> {
+    pub fn device(&self, idx: usize) -> Arc<CudaContext> {
         if let Some(ref coord) = self.replica_coordinator {
             let pool = coord.pool();
             if idx < pool.num_devices() {
@@ -331,7 +331,7 @@ impl MultiGpuContext {
     ///
     /// Slice of all devices in the pool, or a single-element vector
     /// containing the fallback device.
-    pub fn devices(&self) -> Vec<Arc<CudaDevice>> {
+    pub fn devices(&self) -> Vec<Arc<CudaContext>> {
         if let Some(ref coord) = self.replica_coordinator {
             coord.pool().devices().to_vec()
         } else {

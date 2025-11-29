@@ -2,7 +2,6 @@
 //! This is a real, functional implementation, not scaffolding
 
 use anyhow::Result;
-use prism_core::PrismError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -49,17 +48,17 @@ pub struct CmaOptimizer {
     covariance: Vec<Vec<f32>>,
 
     // Evolution paths
-    ps: Vec<f32>, // Path for sigma
-    pc: Vec<f32>, // Path for C
+    ps: Vec<f32>,   // Path for sigma
+    _pc: Vec<f32>,  // Path for C (reserved for full CMA-ES)
 
     // Adaptation parameters
     c_sigma: f32,
     d_sigma: f32,
-    c_c: f32,
-    c_1: f32,
-    c_mu: f32,
+    _c_c: f32,      // Reserved for covariance update
+    _c_1: f32,      // Reserved for rank-one update
+    _c_mu: f32,     // Reserved for rank-mu update
     chi_n: f32,
-    mu_eff: f32,
+    _mu_eff: f32,   // Reserved for effective selection mass
     weights: Vec<f32>,
 
     // State
@@ -124,14 +123,14 @@ impl CmaOptimizer {
             sigma: initial_sigma,
             covariance,
             ps: vec![0.0; dimension],
-            pc: vec![0.0; dimension],
+            _pc: vec![0.0; dimension],
             c_sigma,
             d_sigma,
-            c_c,
-            c_1,
-            c_mu,
+            _c_c: c_c,
+            _c_1: c_1,
+            _c_mu: c_mu,
             chi_n,
-            mu_eff,
+            _mu_eff: mu_eff,
             weights,
             state: CmaState::new(dimension),
             generation: 0,
@@ -150,7 +149,7 @@ impl CmaOptimizer {
         use std::f32::consts::PI;
         let u1 = self.rand();
         let u2 = self.rand();
-        ((-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos())
+        (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
     }
 
     /// Sample from multivariate normal

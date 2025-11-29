@@ -11,7 +11,7 @@ use shared_types::*;
 #[cfg(feature = "cuda")]
 use crate::gpu_kuramoto::GpuKuramotoSolver;
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 
 /// Physics coupling adapter
 pub struct CouplingAdapter {
@@ -37,10 +37,10 @@ impl CouplingAdapter {
 
         #[cfg(feature = "cuda")]
         let gpu_solver = {
-            // Try to initialize GPU solver
-            match CudaDevice::new(0) {
+            // Try to initialize GPU context
+            match CudaContext::new(0) {
                 Ok(device) => {
-                    // CudaDevice::new() returns Arc<CudaDevice>, pass directly
+                    // CudaContext::new() returns Arc<CudaContext>, pass directly
                     match GpuKuramotoSolver::new(device) {
                         Ok(solver) => {
                             println!("[KURAMOTO-GPU] GPU acceleration enabled");

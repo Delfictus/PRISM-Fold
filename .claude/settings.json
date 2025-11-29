@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)"
+    ],
+    "deny": []
+  },
+  "autoApprove": {
+    "enabled": true,
+    "readOperations": true,
+    "writeOperations": true,
+    "bashCommands": true
+  },
+  "safety": {
+    "allowNetworkAccess": true,
+    "allowFileSystemAccess": true,
+    "allowRegistryAccess": true
+  }
+}

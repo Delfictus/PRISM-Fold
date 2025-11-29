@@ -34,10 +34,10 @@
 //! ```rust,no_run
 //! use prism_gpu::aatgs::AsyncPipeline;
 //! use prism_core::RuntimeConfig;
-//! use cudarc::driver::CudaDevice;
+//! use cudarc::driver::CudaContext;
 //! use std::sync::Arc;
 //!
-//! let device = CudaDevice::new(0).unwrap();
+//! let device = CudaContext::new(0).unwrap();
 //! let mut pipeline = AsyncPipeline::new(Arc::new(device)).unwrap();
 //!
 //! let config = RuntimeConfig::production();
@@ -45,7 +45,7 @@
 //! ```
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaContext, CudaStream, CudaSlice};
 use std::sync::Arc;
 
 use prism_core::{KernelTelemetry, RuntimeConfig};
@@ -108,12 +108,10 @@ unsafe impl cudarc::driver::DeviceRepr for AATGSBuffers {}
 /// AATGS Scheduler
 ///
 /// Manages GPU-resident circular buffers for asynchronous config/telemetry exchange.
-/// Uses cudarc 0.9 API (synchronous operations, no explicit streams).
-///
-/// Note: cudarc 0.9 doesn't expose CUDA streams directly, so we simulate async behavior
-/// through careful buffer management and non-blocking queries.
+/// Uses cudarc 0.18.1 API with explicit streams for async operations.
 pub struct AATGSScheduler {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
 
     /// GPU-side buffer state
     d_buffers: CudaSlice<AATGSBuffers>,
@@ -141,19 +139,22 @@ impl AATGSScheduler {
     /// # Returns
     /// * `Ok(Self)` - Initialized scheduler
     /// * `Err(_)` - GPU allocation failure
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>) -> Result<Self> {
         log::info!("Initializing AATGS scheduler with {} config slots, {} telemetry slots",
                    CONFIG_BUFFER_SIZE, TELEMETRY_BUFFER_SIZE);
 
+        let stream = device.default_stream();
+
         // Allocate GPU buffer state (single allocation for entire state)
-        let d_buffers = device
+        let d_buffers = stream
             .alloc_zeros::<AATGSBuffers>(1)
             .context("Failed to allocate GPU buffer state")?;
 
         let local_buffers = AATGSBuffers::default();
 
         Ok(Self {
-            device,
+            context: device,
+            stream,
             d_buffers,
             local_buffers,
             local_config_write_ptr: 0,
@@ -220,10 +221,9 @@ impl AATGSScheduler {
         // Update write pointer in local state
         self.local_buffers.config_write_ptr = self.local_config_write_ptr as i32;
 
-        // Upload entire buffer state to GPU
-        // Note: In cudarc 0.9, we don't have async memcpy, so this blocks
-        self.device
-            .htod_sync_copy_into(&[self.local_buffers], &mut self.d_buffers)
+        // Upload entire buffer state to GPU (replace existing buffer)
+        self.d_buffers = self.stream
+            .clone_htod(&[self.local_buffers])
             .context("Failed to upload config buffer to GPU")?;
 
         Ok(())
@@ -239,10 +239,8 @@ impl AATGSScheduler {
     /// * `Err(_)` - GPU download failure
     pub fn poll_telemetry(&mut self) -> Result<Vec<KernelTelemetry>> {
         // Download current GPU buffer state to check telemetry write pointer
-        // Note: In cudarc 0.9, this is a blocking operation
-        let mut gpu_buffers_array = [AATGSBuffers::default()];
-        self.device
-            .dtoh_sync_copy_into(&self.d_buffers, &mut gpu_buffers_array)
+        let gpu_buffers_array: Vec<AATGSBuffers> = self.stream
+            .clone_dtoh(&self.d_buffers)
             .context("Failed to download buffer state from GPU")?;
         let gpu_buffers = gpu_buffers_array[0];
 
@@ -266,10 +264,10 @@ impl AATGSScheduler {
             self.local_telemetry_read_ptr += 1;
         }
 
-        // Update local read pointer and upload to GPU
+        // Update local read pointer and upload to GPU (replace existing buffer)
         self.local_buffers.telemetry_read_ptr = self.local_telemetry_read_ptr as i32;
-        self.device
-            .htod_sync_copy_into(&[self.local_buffers], &mut self.d_buffers)
+        self.d_buffers = self.stream
+            .clone_htod(&[self.local_buffers])
             .context("Failed to update telemetry read pointer on GPU")?;
 
         Ok(results)
@@ -285,9 +283,8 @@ impl AATGSScheduler {
     /// * `Err(_)` - GPU query failure
     pub fn is_gpu_idle(&mut self) -> Result<bool> {
         // Download current buffer state
-        let mut gpu_buffers_array = [AATGSBuffers::default()];
-        self.device
-            .dtoh_sync_copy_into(&self.d_buffers, &mut gpu_buffers_array)
+        let gpu_buffers_array: Vec<AATGSBuffers> = self.stream
+            .clone_dtoh(&self.d_buffers)
             .context("Failed to query GPU idle status")?;
         let gpu_buffers = gpu_buffers_array[0];
 
@@ -307,13 +304,13 @@ impl AATGSScheduler {
         // Set shutdown flag in local state
         self.local_buffers.cpu_shutdown = 1;
 
-        // Upload to GPU
-        self.device
-            .htod_sync_copy_into(&[self.local_buffers], &mut self.d_buffers)
+        // Upload to GPU (replace existing buffer)
+        self.d_buffers = self.stream
+            .clone_htod(&[self.local_buffers])
             .context("Failed to signal GPU shutdown")?;
 
         // Wait for all operations to complete
-        self.device
+        self.stream
             .synchronize()
             .context("Failed to synchronize device during shutdown")?;
 
@@ -338,8 +335,8 @@ impl AATGSScheduler {
     }
 
     /// Get reference to underlying CUDA device
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Get GPU buffer slice for external kernel coordination
@@ -381,7 +378,7 @@ impl AsyncPipeline {
     /// # Returns
     /// * `Ok(Self)` - Initialized pipeline
     /// * `Err(_)` - Scheduler initialization failure
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>) -> Result<Self> {
         Ok(Self {
             scheduler: AATGSScheduler::new(device)?,
             iteration_count: 0,
@@ -517,7 +514,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_scheduler_init() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let scheduler = AATGSScheduler::new(Arc::new(device));
         assert!(scheduler.is_ok());
     }
@@ -525,7 +522,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_pipeline_init() {
-        let device = CudaDevice::new(0).expect("Failed to create CUDA device");
+        let device = CudaContext::new(0).expect("Failed to create CUDA device");
         let pipeline = AsyncPipeline::new(Arc::new(device));
         assert!(pipeline.is_ok());
     }

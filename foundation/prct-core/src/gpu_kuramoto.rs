@@ -7,7 +7,7 @@ use crate::errors::*;
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchAsync, LaunchConfig};
 
 #[cfg(feature = "cuda")]
 const KURAMOTO_KERNEL: &str = r#"
@@ -85,7 +85,7 @@ extern "C" __global__ void compute_order_parameter_kernel(
 
 #[cfg(feature = "cuda")]
 pub struct GpuKuramotoSolver {
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     kuramoto_step_fn: Arc<CudaFunction>,
     order_parameter_fn: Arc<CudaFunction>,
 }
@@ -93,7 +93,7 @@ pub struct GpuKuramotoSolver {
 #[cfg(feature = "cuda")]
 impl GpuKuramotoSolver {
     /// Create new GPU Kuramoto solver
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>) -> Result<Self> {
         // Compile CUDA kernel
         let ptx = cudarc::nvrtc::compile_ptx(KURAMOTO_KERNEL)
             .map_err(|e| PRCTError::GpuError(format!("NVRTC compilation failed: {:?}", e)))?;
@@ -145,6 +145,7 @@ impl GpuKuramotoSolver {
         dt: f64,
         num_steps: usize,
     ) -> Result<()> {
+        let stream = context.default_stream();
         let n = phases.len();
 
         if n != natural_frequencies.len() {
@@ -223,6 +224,7 @@ impl GpuKuramotoSolver {
     ///
     /// r = |⟨e^(iθ)⟩| where ⟨⟩ is ensemble average
     pub fn compute_order_parameter(&self, phases: &[f64]) -> Result<f64> {
+        let stream = context.default_stream();
         if phases.is_empty() {
             return Ok(0.0);
         }

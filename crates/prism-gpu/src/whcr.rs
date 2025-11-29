@@ -1,6 +1,6 @@
 use anyhow::Result;
 use cudarc::{
-    driver::{CudaDevice, CudaFunction, CudaSlice, LaunchAsync, LaunchConfig},
+    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg},
     nvrtc::Ptx,
 };
 use std::sync::Arc;
@@ -36,7 +36,8 @@ pub struct RepairResult {
 
 /// WHCR GPU context
 pub struct WhcrGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
 
     // Kernel functions
     count_conflicts_f32: CudaFunction,
@@ -98,10 +99,11 @@ struct WaveletLevel {
 impl WhcrGpu {
     /// Initialize WHCR GPU context
     pub fn new(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         num_vertices: usize,
         adjacency: &[Vec<usize>],
     ) -> Result<Self> {
+        let stream = context.default_stream();
         log::info!("Initializing WHCR GPU for {} vertices", num_vertices);
 
         // ASSUMPTIONS validation
@@ -119,56 +121,33 @@ impl WhcrGpu {
             std::env::var("PRISM_PTX_PATH").unwrap_or_else(|_| "target/ptx/whcr.ptx".to_string());
 
         log::debug!("Loading WHCR PTX from: {}", ptx_path);
-        let ptx_data = std::fs::read(&ptx_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read PTX file {}: {}", ptx_path, e))?;
 
-        let ptx = Ptx::from_src(std::str::from_utf8(&ptx_data)?);
+        // Load PTX module using cudarc 0.18.1 API
+        let ptx = Ptx::from_file(&ptx_path);
+        let module = context.load_module(ptx)?;
 
-        device.load_ptx(
-            ptx,
-            "whcr",
-            &[
-                "count_conflicts_f32",
-                "count_conflicts_f64",
-                "compute_wavelet_details",
-                "evaluate_moves_f32",
-                "evaluate_moves_f64", // 12-parameter version
-                "compute_wavelet_priorities",
-                "apply_moves_with_locking",
-                "apply_moves_with_locking_f64", // f64 precision version
-            ],
-        )?;
-
-        // Get kernel functions
-        let count_conflicts_f32 = device
-            .get_func("whcr", "count_conflicts_f32")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get count_conflicts_f32 kernel"))?;
-        let count_conflicts_f64 = device
-            .get_func("whcr", "count_conflicts_f64")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get count_conflicts_f64 kernel"))?;
-        let compute_wavelet_details = device
-            .get_func("whcr", "compute_wavelet_details")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get compute_wavelet_details kernel"))?;
-        let evaluate_moves_f32 = device
-            .get_func("whcr", "evaluate_moves_f32")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get evaluate_moves_f32 kernel"))?;
-        let evaluate_moves_f64 = device
-            .get_func("whcr", "evaluate_moves_f64")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get evaluate_moves_f64 kernel"))?;
-        let compute_wavelet_priorities = device
-            .get_func("whcr", "compute_wavelet_priorities")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get compute_wavelet_priorities kernel"))?;
-        let apply_moves_with_locking = device
-            .get_func("whcr", "apply_moves_with_locking")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get apply_moves_with_locking kernel"))?;
-        let apply_moves_with_locking_f64 = device
-            .get_func("whcr", "apply_moves_with_locking_f64")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get apply_moves_with_locking_f64 kernel"))?;
+        // Get kernel functions from module
+        let count_conflicts_f32 = module
+            .load_function("count_conflicts_f32")?;
+        let count_conflicts_f64 = module
+            .load_function("count_conflicts_f64")?;
+        let compute_wavelet_details = module
+            .load_function("compute_wavelet_details")?;
+        let evaluate_moves_f32 = module
+            .load_function("evaluate_moves_f32")?;
+        let evaluate_moves_f64 = module
+            .load_function("evaluate_moves_f64")?;
+        let compute_wavelet_priorities = module
+            .load_function("compute_wavelet_priorities")?;
+        let apply_moves_with_locking = module
+            .load_function("apply_moves_with_locking")?;
+        let apply_moves_with_locking_f64 = module
+            .load_function("apply_moves_with_locking_f64")?;
 
         // Allocate graph data on GPU
-        let d_coloring = device.alloc_zeros::<i32>(num_vertices)?;
-        let d_adjacency_row_ptr = device.htod_copy(row_ptr)?;
-        let d_adjacency_col_idx = device.htod_copy(col_idx)?;
+        let d_coloring = stream.alloc_zeros::<i32>(num_vertices)?;
+        let d_adjacency_row_ptr = stream.clone_htod(&row_ptr)?;
+        let d_adjacency_col_idx = stream.clone_htod(&col_idx)?;
 
         // Compute number of wavelet levels (log2 of vertices)
         let num_levels = (num_vertices as f64).log2().ceil() as usize;
@@ -179,7 +158,7 @@ impl WhcrGpu {
         let mut prev_size = num_vertices;
 
         // Level 0 (finest)
-        let approximations0 = device.alloc_zeros::<f32>(prev_size)?;
+        let approximations0 = stream.alloc_zeros::<f32>(prev_size)?;
         d_wavelet_levels.push(WaveletLevel {
             approx_size: prev_size,
             detail_size: 0,
@@ -198,14 +177,14 @@ impl WhcrGpu {
                 prev_size
             );
 
-            let approximations = device.alloc_zeros::<f32>(coarse_size)?;
-            let details = device.alloc_zeros::<f64>(prev_size)?;
+            let approximations = stream.alloc_zeros::<f32>(coarse_size)?;
+            let details = stream.alloc_zeros::<f64>(prev_size)?;
             // Build projection fine->coarse (i/2)
             let mut proj_host = Vec::with_capacity(prev_size);
             for i in 0..prev_size {
                 proj_host.push((i / 2) as i32);
             }
-            let projections = device.htod_copy(proj_host)?;
+            let projections = stream.clone_htod(&proj_host)?;
 
             d_wavelet_levels.push(WaveletLevel {
                 approx_size: coarse_size,
@@ -219,19 +198,20 @@ impl WhcrGpu {
         }
 
         // Allocate working memory
-        let d_conflict_counts_f32 = device.alloc_zeros::<f32>(num_vertices)?;
-        let d_conflict_counts_f64 = device.alloc_zeros::<f64>(num_vertices)?;
-        let d_priorities = device.alloc_zeros::<f32>(num_vertices)?;
-        let d_best_colors = device.alloc_zeros::<i32>(num_vertices)?;
-        let d_locks = device.alloc_zeros::<i32>(num_vertices)?;
-        let d_num_moves_applied = device.alloc_zeros::<i32>(1)?;
-        let d_zero_f32 = device.alloc_zeros::<f32>(num_vertices)?;
-        let d_zero_i32 = device.alloc_zeros::<i32>(num_vertices)?;
+        let d_conflict_counts_f32 = stream.alloc_zeros::<f32>(num_vertices)?;
+        let d_conflict_counts_f64 = stream.alloc_zeros::<f64>(num_vertices)?;
+        let d_priorities = stream.alloc_zeros::<f32>(num_vertices)?;
+        let d_best_colors = stream.alloc_zeros::<i32>(num_vertices)?;
+        let d_locks = stream.alloc_zeros::<i32>(num_vertices)?;
+        let d_num_moves_applied = stream.alloc_zeros::<i32>(1)?;
+        let d_zero_f32 = stream.alloc_zeros::<f32>(num_vertices)?;
+        let d_zero_i32 = stream.alloc_zeros::<i32>(num_vertices)?;
 
         log::info!("WHCR GPU initialized with {} levels", num_levels);
 
         Ok(Self {
-            device,
+            context,
+            stream,
             count_conflicts_f32,
             count_conflicts_f64,
             compute_wavelet_details,
@@ -279,16 +259,16 @@ impl WhcrGpu {
         belief_distribution: Option<&[f64]>,
     ) -> Result<()> {
         if let Some(stress) = stress_scores {
-            self.d_stress_scores = Some(self.device.htod_copy(stress.to_vec())?);
+            self.d_stress_scores = Some(self.stream.clone_htod(stress)?);
         }
         if let Some(persistence) = persistence_scores {
-            self.d_persistence_scores = Some(self.device.htod_copy(persistence.to_vec())?);
+            self.d_persistence_scores = Some(self.stream.clone_htod(persistence)?);
         }
         if let Some(hotspots) = hotspot_mask {
-            self.d_hotspot_mask = Some(self.device.htod_copy(hotspots.to_vec())?);
+            self.d_hotspot_mask = Some(self.stream.clone_htod(hotspots)?);
         }
         if let Some(beliefs) = belief_distribution {
-            self.d_belief_distribution = Some(self.device.htod_copy(beliefs.to_vec())?);
+            self.d_belief_distribution = Some(self.stream.clone_htod(beliefs)?);
         }
         Ok(())
     }
@@ -369,8 +349,8 @@ impl WhcrGpu {
                 num_colors,
                 self.move_buffer_colors
             );
-            self.d_move_deltas_f32 = Some(self.device.alloc_zeros::<f32>(required_size)?);
-            self.d_move_deltas_f64 = Some(self.device.alloc_zeros::<f64>(required_size)?);
+            self.d_move_deltas_f32 = Some(self.stream.alloc_zeros::<f32>(required_size)?);
+            self.d_move_deltas_f64 = Some(self.stream.alloc_zeros::<f64>(required_size)?);
             self.move_buffer_colors = num_colors;
         }
 
@@ -389,7 +369,7 @@ impl WhcrGpu {
                 num_colors,
                 required_size
             );
-            self.d_belief_fallback = Some(self.device.alloc_zeros::<f64>(required_size)?);
+            self.d_belief_fallback = Some(self.stream.alloc_zeros::<f64>(required_size)?);
             self.belief_buffer_colors = num_colors;
         }
 
@@ -429,8 +409,7 @@ impl WhcrGpu {
         // Upload coloring to GPU
         log::debug!("WHCR: Uploading coloring to GPU");
         let coloring_i32: Vec<i32> = coloring.iter().map(|&c| c as i32).collect();
-        self.device
-            .htod_copy_into(coloring_i32.clone(), &mut self.d_coloring)?;
+        self.stream.memcpy_htod(&coloring_i32, &mut self.d_coloring)?;
         log::debug!("WHCR: Coloring uploaded successfully");
 
         // Initial wavelet decomposition before V-cycle
@@ -475,7 +454,7 @@ impl WhcrGpu {
         }
 
         // Download result
-        let result_i32 = self.device.dtoh_sync_copy(&self.d_coloring)?;
+        let result_i32 = self.stream.clone_dtoh(&self.d_coloring)?;
         for (i, &c) in result_i32.iter().enumerate() {
             coloring[i] = c as usize;
         }
@@ -536,15 +515,16 @@ impl WhcrGpu {
             ) {
                 // Compute wavelet details: fine - coarse[proj]
                 let cfg = LaunchConfig::for_num_elems(fine_size as u32);
-                let params = (
-                    &prev_level.approximations,    // Fine signal
-                    &current_level.approximations, // Coarse signal
-                    proj,                          // Projection mapping (len = fine_size)
-                    details,                       // Output details (len = fine_size)
-                    fine_size as i32,
-                );
 
-                unsafe { self.compute_wavelet_details.clone().launch(cfg, params)? };
+                unsafe {
+                    self.stream.launch_builder(&self.compute_wavelet_details)
+                        .arg(&prev_level.approximations)
+                        .arg(&current_level.approximations)
+                        .arg(proj)
+                        .arg(details)
+                        .arg(&(fine_size as i32))
+                        .launch(cfg)?
+                };
                 log::trace!("WHCR: Computed wavelet details for level {}", level);
 
                 // Compute priorities over fine_size
@@ -561,18 +541,15 @@ impl WhcrGpu {
                     .map(|h| h)
                     .unwrap_or(&self.d_locks);
 
-                let params = (
-                    details,
-                    &self.d_conflict_counts_f32,
-                    stress_buffer,
-                    hotspot_buffer,
-                    &self.d_priorities,
-                    fine_size as i32,
-                );
                 unsafe {
-                    self.compute_wavelet_priorities
-                        .clone()
-                        .launch(cfg, params)?
+                    self.stream.launch_builder(&self.compute_wavelet_priorities)
+                        .arg(details)
+                        .arg(&self.d_conflict_counts_f32)
+                        .arg(stress_buffer)
+                        .arg(hotspot_buffer)
+                        .arg(&self.d_priorities)
+                        .arg(&(fine_size as i32))
+                        .launch(cfg)?
                 };
 
                 log::trace!("WHCR: Computed wavelet priorities for level {}", level);
@@ -585,70 +562,72 @@ impl WhcrGpu {
             if !use_precise {
                 // f32 path
                 let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
-                let params = (
-                    &self.d_coloring,
-                    &self.d_adjacency_row_ptr,
-                    &self.d_adjacency_col_idx,
-                    &self.d_conflict_counts_f32,
-                    self.num_vertices as i32,
-                );
-                unsafe { self.count_conflicts_f32.clone().launch(cfg, params)? };
-                self.device.synchronize()?;
+                unsafe {
+                    self.stream.launch_builder(&self.count_conflicts_f32)
+                        .arg(&self.d_coloring)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(&self.d_conflict_counts_f32)
+                        .arg(&(self.num_vertices as i32))
+                        .launch(cfg)?
+                };
+                self.context.synchronize()?;
             } else if self.d_stress_scores.is_some() && self.d_hotspot_mask.is_some() {
                 // f64 path with geometry
                 let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
-                let params = (
-                    &self.d_coloring,
-                    &self.d_adjacency_row_ptr,
-                    &self.d_adjacency_col_idx,
-                    self.d_stress_scores.as_ref().unwrap(),
-                    self.d_hotspot_mask.as_ref().unwrap(),
-                    &self.d_conflict_counts_f64,
-                    self.num_vertices as i32,
-                );
-                unsafe { self.count_conflicts_f64.clone().launch(cfg, params)? };
-                self.device.synchronize()?;
+                unsafe {
+                    self.stream.launch_builder(&self.count_conflicts_f64)
+                        .arg(&self.d_coloring)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(self.d_stress_scores.as_ref().unwrap())
+                        .arg(self.d_hotspot_mask.as_ref().unwrap())
+                        .arg(&self.d_conflict_counts_f64)
+                        .arg(&(self.num_vertices as i32))
+                        .launch(cfg)?
+                };
+                self.context.synchronize()?;
                 conflict_counts_source_f64 = true;
             } else {
                 // Fallback to f32 if geometry not available
                 let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
-                let params = (
-                    &self.d_coloring,
-                    &self.d_adjacency_row_ptr,
-                    &self.d_adjacency_col_idx,
-                    &self.d_conflict_counts_f32,
-                    self.num_vertices as i32,
-                );
-                unsafe { self.count_conflicts_f32.clone().launch(cfg, params)? };
-                self.device.synchronize()?;
+                unsafe {
+                    self.stream.launch_builder(&self.count_conflicts_f32)
+                        .arg(&self.d_coloring)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(&self.d_conflict_counts_f32)
+                        .arg(&(self.num_vertices as i32))
+                        .launch(cfg)?
+                };
+                self.context.synchronize()?;
             }
 
             // If f64 path ran, mirror counts into f32 buffer to keep downstream logic in sync
             if conflict_counts_source_f64 {
-                let counts_f64 = self.device.dtoh_sync_copy(&self.d_conflict_counts_f64)?;
+                let counts_f64 = self.stream.clone_dtoh(&self.d_conflict_counts_f64)?;
                 let counts_f32: Vec<f32> = counts_f64.iter().map(|&c| c as f32).collect();
-                self.device
-                    .htod_copy_into(counts_f32, &mut self.d_conflict_counts_f32)?;
+                self.stream.memcpy_htod(&counts_f32, &mut self.d_conflict_counts_f32)?;
             }
 
             // ========== MOVE EVALUATION AND APPLICATION ==========
 
             // CRITICAL FIX: Zero out move delta buffers before evaluation to prevent stale data
             if let Some(ref mut buf) = self.d_move_deltas_f32 {
-                self.device.memset_zeros(buf)?;
+                self.stream.memset_zeros(buf)?;
             }
             if let Some(ref mut buf) = self.d_move_deltas_f64 {
-                self.device.memset_zeros(buf)?;
+                self.stream.memset_zeros(buf)?;
             }
-            self.device.memset_zeros(&mut self.d_best_colors)?;
+            self.stream.memset_zeros(&mut self.d_best_colors)?;
 
             // Ensure zeros written before any kernel launches
-            self.device.synchronize()?;
+            self.context.synchronize()?;
 
             // Step 1: Build list of conflicting vertices
             // For efficiency, only evaluate moves for vertices with conflicts
             let conflict_vertices: Vec<i32> = if conflict_counts_source_f64 {
-                let conflicts_f64 = self.device.dtoh_sync_copy(&self.d_conflict_counts_f64)?;
+                let conflicts_f64 = self.stream.clone_dtoh(&self.d_conflict_counts_f64)?;
                 conflicts_f64
                     .iter()
                     .enumerate()
@@ -656,7 +635,7 @@ impl WhcrGpu {
                     .map(|(v, _)| v as i32)
                     .collect()
             } else {
-                let conflicts_f32 = self.device.dtoh_sync_copy(&self.d_conflict_counts_f32)?;
+                let conflicts_f32 = self.stream.clone_dtoh(&self.d_conflict_counts_f32)?;
                 conflicts_f32
                     .iter()
                     .enumerate()
@@ -675,7 +654,7 @@ impl WhcrGpu {
             // Optional: wavelet-priority-based filtering (top-K)
             let conflict_vertices = if self.enable_wavelets && level > 0 {
                 // Score all conflicted vertices by wavelet priority (fallback to 0.0 if not populated)
-                let priorities = self.device.dtoh_sync_copy(&self.d_priorities)?;
+                let priorities = self.stream.clone_dtoh(&self.d_priorities)?;
                 let mut scored: Vec<(f32, i32)> = conflict_vertices
                     .iter()
                     .cloned()
@@ -706,7 +685,7 @@ impl WhcrGpu {
             );
 
             // Upload conflict vertices to GPU
-            let d_conflict_vertices = self.device.htod_copy(conflict_vertices)?;
+            let d_conflict_vertices = self.stream.clone_htod(&conflict_vertices)?;
 
             // Step 2: Evaluate moves based on precision level
             if !use_precise {
@@ -721,26 +700,26 @@ impl WhcrGpu {
                     .as_ref()
                     .unwrap_or(&self.d_zero_f32);
 
-                let params = (
-                    &self.d_coloring,
-                    &self.d_adjacency_row_ptr,
-                    &self.d_adjacency_col_idx,
-                    &d_conflict_vertices,
-                    num_conflict_vertices as i32,
-                    num_colors as i32,
-                    move_deltas_f32,
-                    &self.d_best_colors,
-                    reservoir_buffer,
-                );
-
-                unsafe { self.evaluate_moves_f32.clone().launch(cfg, params)? };
+                unsafe {
+                    self.stream.launch_builder(&self.evaluate_moves_f32)
+                        .arg(&self.d_coloring)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(&d_conflict_vertices)
+                        .arg(&(num_conflict_vertices as i32))
+                        .arg(&(num_colors as i32))
+                        .arg(move_deltas_f32)
+                        .arg(&self.d_best_colors)
+                        .arg(reservoir_buffer)
+                        .launch(cfg)?
+                };
                 // CRITICAL FIX: Synchronize after kernel launch
-                self.device.synchronize()?;
+                self.context.synchronize()?;
 
                 // Debug: capture a small sample of deltas when no progress is made
-                let moves_applied_dbg = self.device.dtoh_sync_copy(&self.d_num_moves_applied)?;
+                let moves_applied_dbg = self.stream.clone_dtoh(&self.d_num_moves_applied)?;
                 if moves_applied_dbg[0] == 0 && num_conflict_vertices > 0 {
-                    let deltas = self.device.dtoh_sync_copy(move_deltas_f32)?;
+                    let deltas = self.stream.clone_dtoh(move_deltas_f32)?;
                     let mut sample = Vec::new();
                     for v in 0..num_conflict_vertices.min(5) {
                         let base = v * num_colors;
@@ -805,24 +784,24 @@ impl WhcrGpu {
                     .ok_or_else(|| anyhow::anyhow!("Move deltas f64 not allocated"))?;
 
                 // 12 parameters: removed hotspot_mask (now derived from stress in kernel)
-                let params = (
-                    &self.d_coloring,             // 1
-                    &self.d_adjacency_row_ptr,    // 2
-                    &self.d_adjacency_col_idx,    // 3
-                    &d_conflict_vertices,         // 4
-                    num_conflict_vertices as i32, // 5
-                    num_colors as i32,            // 6
-                    stress_buffer,                // 7
-                    persistence_buffer,           // 8
-                    belief_buffer,                // 9
-                    self.num_vertices as i32,     // 10
-                    move_deltas_f64,              // 11
-                    &self.d_best_colors,          // 12
-                );
-
-                unsafe { self.evaluate_moves_f64.clone().launch(cfg, params)? };
+                unsafe {
+                    self.stream.launch_builder(&self.evaluate_moves_f64)
+                        .arg(&self.d_coloring)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(&d_conflict_vertices)
+                        .arg(&(num_conflict_vertices as i32))
+                        .arg(&(num_colors as i32))
+                        .arg(stress_buffer)
+                        .arg(persistence_buffer)
+                        .arg(belief_buffer)
+                        .arg(&(self.num_vertices as i32))
+                        .arg(move_deltas_f64)
+                        .arg(&self.d_best_colors)
+                        .launch(cfg)?
+                };
                 // CRITICAL FIX: Synchronize after kernel launch
-                self.device.synchronize()?;
+                self.context.synchronize()?;
             }
 
             // Step 3: Apply best moves with parallel locking
@@ -832,7 +811,7 @@ impl WhcrGpu {
             );
 
             // Reset num_moves_applied counter
-            self.device.memset_zeros(&mut self.d_num_moves_applied)?;
+            self.stream.memset_zeros(&mut self.d_num_moves_applied)?;
 
             let cfg = LaunchConfig::for_num_elems(num_conflict_vertices as u32);
 
@@ -856,25 +835,21 @@ impl WhcrGpu {
                 // Use hotspot mask if available; otherwise treat as all-zero mask via the shared zero buffer
                 let hotspot_buffer = self.d_hotspot_mask.as_ref().unwrap_or(&self.d_zero_i32);
 
-                let params = (
-                    &mut self.d_coloring,
-                    &d_conflict_vertices,
-                    &self.d_best_colors,
-                    move_deltas_f64,
-                    num_conflict_vertices as i32,
-                    num_colors as i32,
-                    &mut self.d_locks,
-                    &mut self.d_num_moves_applied,
-                    &self.d_adjacency_row_ptr, // CSR needed for validation
-                    &self.d_adjacency_col_idx,
-                    stress_buffer,
-                    hotspot_buffer,
-                );
-
                 unsafe {
-                    self.apply_moves_with_locking_f64
-                        .clone()
-                        .launch(cfg, params)?
+                    self.stream.launch_builder(&self.apply_moves_with_locking_f64)
+                        .arg(&mut self.d_coloring)
+                        .arg(&d_conflict_vertices)
+                        .arg(&self.d_best_colors)
+                        .arg(move_deltas_f64)
+                        .arg(&(num_conflict_vertices as i32))
+                        .arg(&(num_colors as i32))
+                        .arg(&mut self.d_locks)
+                        .arg(&mut self.d_num_moves_applied)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .arg(stress_buffer)
+                        .arg(hotspot_buffer)
+                        .launch(cfg)?
                 };
             } else {
                 // f32 path - use f32 kernel with f32 buffer
@@ -885,27 +860,27 @@ impl WhcrGpu {
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("Move deltas f32 not allocated"))?;
 
-                let params = (
-                    &mut self.d_coloring,
-                    &d_conflict_vertices,
-                    &self.d_best_colors,
-                    move_deltas_f32,
-                    num_conflict_vertices as i32,
-                    num_colors as i32,
-                    &mut self.d_locks,
-                    &mut self.d_num_moves_applied,
-                    &self.d_adjacency_row_ptr,
-                    &self.d_adjacency_col_idx,
-                );
-
-                unsafe { self.apply_moves_with_locking.clone().launch(cfg, params)? };
+                unsafe {
+                    self.stream.launch_builder(&self.apply_moves_with_locking)
+                        .arg(&mut self.d_coloring)
+                        .arg(&d_conflict_vertices)
+                        .arg(&self.d_best_colors)
+                        .arg(move_deltas_f32)
+                        .arg(&(num_conflict_vertices as i32))
+                        .arg(&(num_colors as i32))
+                        .arg(&mut self.d_locks)
+                        .arg(&mut self.d_num_moves_applied)
+                        .arg(&self.d_adjacency_row_ptr)
+                        .arg(&self.d_adjacency_col_idx)
+                        .launch(cfg)?
+                };
             }
 
-            self.device.synchronize()?;
+            self.context.synchronize()?;
 
             // DIAGNOSTIC: Count conflicts after move application
             let conflicts_after = self.count_conflicts_gpu()?;
-            let moves_applied = self.device.dtoh_sync_copy(&self.d_num_moves_applied)?;
+            let moves_applied = self.stream.clone_dtoh(&self.d_num_moves_applied)?;
 
             // Enhanced diagnostic logging for debugging
             log::info!(
@@ -928,11 +903,11 @@ impl WhcrGpu {
             }
 
             // Reset locks for next iteration
-            self.device.memset_zeros(&mut self.d_locks)?;
+            self.stream.memset_zeros(&mut self.d_locks)?;
 
             // ========== END MOVE EVALUATION AND APPLICATION ==========
 
-            self.device.synchronize()?;
+            self.context.synchronize()?;
 
             // Check if any conflicts remain
             if conflicts_after == 0 {
@@ -964,18 +939,19 @@ impl WhcrGpu {
     fn count_conflicts_gpu(&mut self) -> Result<usize> {
         // Launch conflict counting kernel
         let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
-        let params = (
-            &self.d_coloring,
-            &self.d_adjacency_row_ptr,
-            &self.d_adjacency_col_idx,
-            &self.d_conflict_counts_f32,
-            self.num_vertices as i32,
-        );
-        unsafe { self.count_conflicts_f32.clone().launch(cfg, params)? };
-        self.device.synchronize()?;
+        unsafe {
+            self.stream.launch_builder(&self.count_conflicts_f32)
+                .arg(&self.d_coloring)
+                .arg(&self.d_adjacency_row_ptr)
+                .arg(&self.d_adjacency_col_idx)
+                .arg(&self.d_conflict_counts_f32)
+                .arg(&(self.num_vertices as i32))
+                .launch(cfg)?
+        };
+        self.context.synchronize()?;
 
         // Download counts and sum
-        let counts = self.device.dtoh_sync_copy(&self.d_conflict_counts_f32)?;
+        let counts = self.stream.clone_dtoh(&self.d_conflict_counts_f32)?;
         let total: f32 = counts.iter().sum();
 
         // Each conflict is counted twice (once from each endpoint)
@@ -989,13 +965,12 @@ impl WhcrGpu {
     fn decompose_conflict_signal(&mut self) -> Result<()> {
         // Compute conflict counts first to seed level 0
         self.count_conflicts_gpu()?;
-        let counts = self.device.dtoh_sync_copy(&self.d_conflict_counts_f32)?;
+        let counts = self.stream.clone_dtoh(&self.d_conflict_counts_f32)?;
 
         // Level 0 approximations <- conflict counts
         if let Some(level0) = self.d_wavelet_levels.get_mut(0) {
-            let mut host = counts;
-            self.device
-                .htod_copy_into(host, &mut level0.approximations)?;
+            let host = counts;
+            self.stream.memcpy_htod(&host, &mut level0.approximations)?;
         }
 
         // Work coarse from level 1 upward
@@ -1008,7 +983,7 @@ impl WhcrGpu {
             };
 
             // Download fine approximations
-            let fine = self.device.dtoh_sync_copy(&prev_level.approximations)?;
+            let fine = self.stream.clone_dtoh(&prev_level.approximations)?;
 
             // Build coarse approximations by averaging pairs
             let mut coarse_host = vec![0f32; curr_level.approx_size];
@@ -1018,26 +993,26 @@ impl WhcrGpu {
             }
 
             // Upload coarse approximations
-            self.device
-                .htod_copy_into(coarse_host, &mut curr_level.approximations)?;
+            self.stream.memcpy_htod(&coarse_host, &mut curr_level.approximations)?;
 
             // Compute details: fine - coarse[proj]
             if let (Some(details), Some(proj)) =
                 (curr_level.details.as_ref(), curr_level.projections.as_ref())
             {
                 let cfg = LaunchConfig::for_num_elems(prev_level.approx_size as u32);
-                let params = (
-                    &prev_level.approximations, // fine signal
-                    &curr_level.approximations, // coarse signal
-                    proj,                       // projection fine->coarse
-                    details,                    // output details (len = fine size)
-                    prev_level.approx_size as i32,
-                );
-                unsafe { self.compute_wavelet_details.clone().launch(cfg, params)? };
+                unsafe {
+                    self.stream.launch_builder(&self.compute_wavelet_details)
+                        .arg(&prev_level.approximations)
+                        .arg(&curr_level.approximations)
+                        .arg(proj)
+                        .arg(details)
+                        .arg(&(prev_level.approx_size as i32))
+                        .launch(cfg)?
+                };
             }
         }
 
-        self.device.synchronize()?;
+        self.context.synchronize()?;
         Ok(())
     }
 
@@ -1055,17 +1030,14 @@ impl WhcrGpu {
     /// ```
     pub fn count_conflicts_async(&self) -> Result<()> {
         let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
-        let params = (
-            &self.d_coloring,
-            &self.d_adjacency_row_ptr,
-            &self.d_adjacency_col_idx,
-            &self.d_conflict_counts_f32,
-            self.num_vertices as i32,
-        );
         unsafe {
-            self.count_conflicts_f32
-                .clone()
-                .launch(cfg, params)?
+            self.stream.launch_builder(&self.count_conflicts_f32)
+                .arg(&self.d_coloring)
+                .arg(&self.d_adjacency_row_ptr)
+                .arg(&self.d_adjacency_col_idx)
+                .arg(&self.d_conflict_counts_f32)
+                .arg(&(self.num_vertices as i32))
+                .launch(cfg)?
         };
         Ok(()) // Returns immediately - kernel runs asynchronously
     }
@@ -1075,7 +1047,7 @@ impl WhcrGpu {
     /// Blocks until all operations on the WHCR stream are complete.
     /// Must be called before reading results from async operations.
     pub fn synchronize(&self) -> Result<()> {
-        self.device.synchronize()?;
+        self.context.synchronize()?;
         Ok(())
     }
 }

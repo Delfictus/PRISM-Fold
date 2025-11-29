@@ -10,7 +10,7 @@
 //! - Result aggregation via best-solution selection
 
 use crate::errors::*;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use shared_types::{ColoringSolution, Graph};
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// aggregated to find the best coloring solution.
 ///
 /// # Arguments
-/// * `devices` - Array of CUDA devices (from MultiGpuDevicePool)
+/// * `devices` - Array of CUDA contexts (from MultiGpuDevicePool)
 /// * `graph` - Input graph structure
 /// * `initial_solution` - Starting coloring configuration
 /// * `total_replicas` - Total number of replicas (distributed across GPUs)
@@ -34,7 +34,7 @@ use std::sync::Arc;
 /// Vec<ColoringSolution> - Best solutions from all GPUs
 #[allow(clippy::too_many_arguments)]
 pub fn equilibrate_thermodynamic_multi_gpu(
-    devices: &[Arc<CudaDevice>],
+    devices: &[Arc<CudaContext>],
     graph: &Graph,
     initial_solution: &ColoringSolution,
     total_replicas: usize,
@@ -94,8 +94,8 @@ pub fn equilibrate_thermodynamic_multi_gpu(
     let handles: Vec<_> = devices
         .iter()
         .enumerate()
-        .map(|(gpu_idx, device)| {
-            let device = device.clone();
+        .map(|(gpu_idx, context)| {
+            let context = context.clone();
             let graph = graph.clone();
             let initial = initial_solution.clone();
             let ai_unc = ai_uncertainty_owned.clone();
@@ -126,14 +126,12 @@ pub fn equilibrate_thermodynamic_multi_gpu(
 
                 let start_time = std::time::Instant::now();
 
-                // Create stream for this GPU (cudarc 0.9: fork_default_stream)
-                let stream = device.fork_default_stream().map_err(|e| {
-                    PRCTError::GpuError(format!("GPU {}: Failed to fork stream: {}", gpu_idx, e))
-                })?;
+                // cudarc 0.18.1: use default_stream() instead of fork_default_stream()
+                let stream = context.default_stream();
 
                 // Run equilibration on this GPU with AI guidance (shared across all GPUs)
                 let solutions = crate::gpu_thermodynamic::equilibrate_thermodynamic_gpu(
-                    &device,
+                    &context,
                     &stream,
                     &graph,
                     &initial,

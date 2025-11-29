@@ -15,7 +15,10 @@
 //! REFERENCE: PRISM Spec Section 5.3 "Causal Discovery via Transfer Entropy"
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::{
+    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg},
+    nvrtc::Ptx,
+};
 use std::sync::Arc;
 
 /// Transfer entropy computation parameters
@@ -45,7 +48,15 @@ impl Default for TEParams {
 
 /// Transfer Entropy GPU accelerator
 pub struct TransferEntropyGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
+
+    // Kernel functions
+    ksg_kernel: CudaFunction,
+    conditional_te_kernel: CudaFunction,
+    multivariate_te_kernel: CudaFunction,
+    sliding_window_te_kernel: CudaFunction,
+    te_performance_metrics_kernel: CudaFunction,
 
     // Device memory
     time_series: CudaSlice<f32>,
@@ -71,7 +82,7 @@ impl TransferEntropyGpu {
     /// # Returns
     /// Initialized TE accelerator with pre-allocated GPU memory
     pub fn new(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         num_variables: usize,
         series_length: usize,
     ) -> Result<Self> {
@@ -93,44 +104,41 @@ impl TransferEntropyGpu {
             series_length
         );
 
+        let stream = context.default_stream();
+
         // Load PTX module with explicit kernel list from file system
-        let ptx_path = std::path::Path::new("target/ptx/transfer_entropy.ptx");
-        let ptx = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read Transfer Entropy PTX file: {:?}", ptx_path))?;
-        device
-            .load_ptx(
-                ptx.into(),
-                "transfer_entropy",
-                &[
-                    "transfer_entropy_ksg_kernel",
-                    "conditional_te_kernel",
-                    "multivariate_te_kernel",
-                    "sliding_window_te_kernel",
-                    "ensemble_te_kernel",
-                    "te_performance_metrics",
-                ],
-            )
+        let ptx_path = "target/ptx/transfer_entropy.ptx";
+        let ptx = Ptx::from_file(ptx_path);
+        let module = context
+            .load_module(ptx)
             .context("Failed to load Transfer Entropy PTX module")?;
 
-        log::debug!("Transfer Entropy PTX module loaded with 6 kernels");
+        // Load kernel functions
+        let ksg_kernel = module.load_function("transfer_entropy_ksg_kernel")?;
+        let conditional_te_kernel = module.load_function("conditional_te_kernel")?;
+        let multivariate_te_kernel = module.load_function("multivariate_te_kernel")?;
+        let sliding_window_te_kernel = module.load_function("sliding_window_te_kernel")?;
+        let te_performance_metrics_kernel = module.load_function("te_performance_metrics")?;
+
+        log::debug!("Transfer Entropy PTX module loaded with 5 kernels");
 
         // Allocate device memory
         let ts_size = num_variables * series_length;
         let matrix_size = num_variables * num_variables;
 
-        let time_series = device
+        let time_series = stream
             .alloc_zeros::<f32>(ts_size)
             .context("Failed to allocate time series memory")?;
 
-        let te_matrix = device
+        let te_matrix = stream
             .alloc_zeros::<f32>(matrix_size)
             .context("Failed to allocate TE matrix")?;
 
-        let significance = device
+        let significance = stream
             .alloc_zeros::<f32>(matrix_size)
             .context("Failed to allocate significance matrix")?;
 
-        let neighbor_counts = device
+        let neighbor_counts = stream
             .alloc_zeros::<i32>(series_length * num_variables)
             .context("Failed to allocate neighbor counts")?;
 
@@ -141,7 +149,13 @@ impl TransferEntropyGpu {
         };
 
         Ok(Self {
-            device,
+            context,
+            stream,
+            ksg_kernel,
+            conditional_te_kernel,
+            multivariate_te_kernel,
+            sliding_window_te_kernel,
+            te_performance_metrics_kernel,
             time_series,
             te_matrix,
             significance,
@@ -163,8 +177,8 @@ impl TransferEntropyGpu {
             expected_size
         );
 
-        self.device
-            .htod_sync_copy_into(data, &mut self.time_series)
+        self.time_series = self.stream
+            .clone_htod(data)
             .context("Failed to upload time series")?;
 
         Ok(())
@@ -186,36 +200,27 @@ impl TransferEntropyGpu {
             shared_mem_bytes: shared_mem_size,
         };
 
-        // Get KSG kernel
-        let kernel = self
-            .device
-            .get_func("transfer_entropy", "transfer_entropy_ksg_kernel")
-            .context("Failed to get KSG kernel")?;
-
         // Launch kernel
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.time_series,
-                    &self.te_matrix,
-                    &self.significance,
-                    &self.neighbor_counts,
-                    self.params.num_variables,
-                    self.params.series_length,
-                    self.params.history_length,
-                    self.params.prediction_lag,
-                    self.params.noise_level,
-                ),
-            )
-        }
-        .context("Failed to launch KSG kernel")?;
+            self.stream.launch_builder(&self.ksg_kernel)
+                .arg(&self.time_series)
+                .arg(&self.te_matrix)
+                .arg(&self.significance)
+                .arg(&self.neighbor_counts)
+                .arg(&self.params.num_variables)
+                .arg(&self.params.series_length)
+                .arg(&self.params.history_length)
+                .arg(&self.params.prediction_lag)
+                .arg(&self.params.noise_level)
+                .launch(config)
+                .context("Failed to launch KSG kernel")?
+        };
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
         // Download results
-        let te_values = self.device.dtoh_sync_copy(&self.te_matrix)?;
-        let p_values = self.device.dtoh_sync_copy(&self.significance)?;
+        let te_values = self.stream.clone_dtoh(&self.te_matrix)?;
+        let p_values = self.stream.clone_dtoh(&self.significance)?;
 
         Ok(TEMatrix {
             values: te_values,
@@ -234,11 +239,11 @@ impl TransferEntropyGpu {
         // Allocate CTE matrix if needed
         if self.cte_matrix.is_none() {
             let matrix_size = (self.params.num_variables * self.params.num_variables) as usize;
-            self.cte_matrix = Some(self.device.alloc_zeros::<f32>(matrix_size)?);
+            self.cte_matrix = Some(self.stream.alloc_zeros::<f32>(matrix_size)?);
         }
 
         // Upload conditioning variables
-        let conditioning_gpu = self.device.htod_sync_copy(
+        let conditioning_gpu = self.stream.clone_htod(
             &conditioning_vars
                 .iter()
                 .map(|&v| v as i32)
@@ -256,31 +261,23 @@ impl TransferEntropyGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("transfer_entropy", "conditional_te_kernel")
-            .context("Failed to get CTE kernel")?;
-
         let cte_matrix = self.cte_matrix.as_ref().unwrap();
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.time_series,
-                    &conditioning_gpu,
-                    cte_matrix,
-                    self.params.num_variables,
-                    self.params.series_length,
-                    conditioning_vars.len() as i32,
-                ),
-            )
-        }
-        .context("Failed to launch CTE kernel")?;
+            self.stream.launch_builder(&self.conditional_te_kernel)
+                .arg(&self.time_series)
+                .arg(&conditioning_gpu)
+                .arg(cte_matrix)
+                .arg(&self.params.num_variables)
+                .arg(&self.params.series_length)
+                .arg(&(conditioning_vars.len() as i32))
+                .launch(config)
+                .context("Failed to launch CTE kernel")?
+        };
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let cte_values = self.device.dtoh_sync_copy(cte_matrix)?;
+        let cte_values = self.stream.clone_dtoh(cte_matrix)?;
 
         Ok(TEMatrix {
             values: cte_values,
@@ -312,7 +309,7 @@ impl TransferEntropyGpu {
         let num_windows = ((self.params.series_length as usize - window_size) / window_stride) + 1;
 
         // Allocate output buffer
-        let te_timeseries = self.device.alloc_zeros::<f32>(num_windows)?;
+        let te_timeseries = self.stream.alloc_zeros::<f32>(num_windows)?;
 
         // Launch configuration
         let threads_per_block = 256;
@@ -324,30 +321,22 @@ impl TransferEntropyGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("transfer_entropy", "sliding_window_te_kernel")
-            .context("Failed to get sliding window kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.time_series,
-                    &te_timeseries,
-                    source_idx as i32,
-                    target_idx as i32,
-                    window_size as i32,
-                    window_stride as i32,
-                    self.params.series_length,
-                ),
-            )
-        }
-        .context("Failed to launch sliding window kernel")?;
+            self.stream.launch_builder(&self.sliding_window_te_kernel)
+                .arg(&self.time_series)
+                .arg(&te_timeseries)
+                .arg(&(source_idx as i32))
+                .arg(&(target_idx as i32))
+                .arg(&(window_size as i32))
+                .arg(&(window_stride as i32))
+                .arg(&self.params.series_length)
+                .launch(config)
+                .context("Failed to launch sliding window kernel")?
+        };
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        Ok(self.device.dtoh_sync_copy(&te_timeseries)?)
+        Ok(self.stream.clone_dtoh(&te_timeseries)?)
     }
 
     /// Computes multivariate transfer entropy (multiple sources to one target)
@@ -363,12 +352,11 @@ impl TransferEntropyGpu {
         );
 
         // Upload source indices
-        let sources_gpu = self
-            .device
-            .htod_sync_copy(&source_indices.iter().map(|&v| v as i32).collect::<Vec<_>>())?;
+        let sources_gpu = self.stream
+            .clone_htod(&source_indices.iter().map(|&v| v as i32).collect::<Vec<_>>())?;
 
         // Allocate result
-        let mte_result = self.device.alloc_zeros::<f32>(1)?;
+        let mte_result = self.stream.alloc_zeros::<f32>(1)?;
 
         // Launch configuration
         let threads_per_block = 256;
@@ -381,37 +369,29 @@ impl TransferEntropyGpu {
             shared_mem_bytes: threads_per_block as u32 * 4,
         };
 
-        let kernel = self
-            .device
-            .get_func("transfer_entropy", "multivariate_te_kernel")
-            .context("Failed to get multivariate TE kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.time_series,
-                    &sources_gpu,
-                    source_indices.len() as i32,
-                    target_idx as i32,
-                    &mte_result,
-                    self.params.series_length,
-                    self.params.history_length,
-                ),
-            )
-        }
-        .context("Failed to launch multivariate TE kernel")?;
+            self.stream.launch_builder(&self.multivariate_te_kernel)
+                .arg(&self.time_series)
+                .arg(&sources_gpu)
+                .arg(&(source_indices.len() as i32))
+                .arg(&(target_idx as i32))
+                .arg(&mte_result)
+                .arg(&self.params.series_length)
+                .arg(&self.params.history_length)
+                .launch(config)
+                .context("Failed to launch multivariate TE kernel")?
+        };
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let result = self.device.dtoh_sync_copy(&mte_result)?;
+        let result = self.stream.clone_dtoh(&mte_result)?;
         Ok(result[0])
     }
 
     /// Gets performance metrics for the computed TE matrix
     pub fn get_performance_metrics(&self) -> Result<TEMetrics> {
         // Allocate metrics buffer
-        let metrics = self.device.alloc_zeros::<f32>(3)?;
+        let metrics = self.stream.alloc_zeros::<f32>(3)?;
 
         let config = LaunchConfig {
             grid_dim: (1, 1, 1),
@@ -419,22 +399,18 @@ impl TransferEntropyGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("transfer_entropy", "te_performance_metrics")
-            .context("Failed to get metrics kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (&self.te_matrix, &metrics, self.params.num_variables),
-            )
-        }
-        .context("Failed to launch metrics kernel")?;
+            self.stream.launch_builder(&self.te_performance_metrics_kernel)
+                .arg(&self.te_matrix)
+                .arg(&metrics)
+                .arg(&self.params.num_variables)
+                .launch(config)
+                .context("Failed to launch metrics kernel")?
+        };
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let metrics_vec = self.device.dtoh_sync_copy(&metrics)?;
+        let metrics_vec = self.stream.clone_dtoh(&metrics)?;
 
         Ok(TEMetrics {
             sparsity: metrics_vec[0],
@@ -445,7 +421,7 @@ impl TransferEntropyGpu {
 
     /// Builds causal graph from TE matrix with threshold
     pub fn build_causal_graph(&self, threshold: f32) -> Result<CausalGraph> {
-        let te_values = self.device.dtoh_sync_copy(&self.te_matrix)?;
+        let te_values = self.stream.clone_dtoh(&self.te_matrix)?;
         let n = self.params.num_variables as usize;
 
         let mut edges = Vec::new();
@@ -544,7 +520,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_te_initialization() {
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let te = TransferEntropyGpu::new(Arc::new(device), 10, 1000);
         assert!(te.is_ok());
     }
@@ -552,7 +528,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_te_computation() {
-        let device = Arc::new(CudaDevice::new(0).unwrap());
+        let device = Arc::new(CudaContext::new(0).unwrap());
         let mut te = TransferEntropyGpu::new(device, 5, 500).unwrap();
 
         // Generate synthetic time series

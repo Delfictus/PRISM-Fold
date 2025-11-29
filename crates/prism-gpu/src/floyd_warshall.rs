@@ -27,7 +27,8 @@
 //! REFERENCE: PRISM GPU Plan §4.4 (Phase 4 APSP Kernel)
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// Maximum supported graph size (enforced at runtime)
@@ -39,10 +40,20 @@ const BLOCK_SIZE: usize = 32;
 /// GPU-accelerated Floyd-Warshall APSP solver
 ///
 /// Maintains CUDA device context and compiled PTX module.
-/// Thread-safe via Arc<CudaDevice>.
+/// Thread-safe via Arc<CudaContext>.
 pub struct FloydWarshallGpu {
     /// CUDA device handle
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    /// CUDA stream for operations
+    stream: Arc<CudaStream>,
+    /// Phase 1 kernel function
+    phase1_func: CudaFunction,
+    /// Phase 2 row kernel function
+    phase2_row_func: CudaFunction,
+    /// Phase 2 col kernel function
+    phase2_col_func: CudaFunction,
+    /// Phase 3 kernel function
+    phase3_func: CudaFunction,
 }
 
 impl FloydWarshallGpu {
@@ -60,36 +71,49 @@ impl FloydWarshallGpu {
     ///
     /// # Example
     /// ```rust,no_run
-    /// use cudarc::driver::CudaDevice;
+    /// use cudarc::driver::CudaContext;
     /// use prism_gpu::floyd_warshall::FloydWarshallGpu;
     /// use std::sync::Arc;
     ///
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let fw = FloydWarshallGpu::new(Arc::new(device), "kernels/floyd_warshall.ptx").unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         log::info!("Loading Floyd-Warshall PTX module from: {}", ptx_path);
 
         // Load PTX module
-        let ptx_str = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read PTX file: {}", ptx_path))?;
-
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "floyd_warshall",
-                &[
-                    "floyd_warshall_phase1",
-                    "floyd_warshall_phase2_row",
-                    "floyd_warshall_phase2_col",
-                    "floyd_warshall_phase3",
-                ],
-            )
+        let ptx = Ptx::from_file(ptx_path);
+        let module = device
+            .load_module(ptx)
             .context("Failed to load Floyd-Warshall PTX module")?;
+
+        // Load kernel functions
+        let phase1_func = module
+            .load_function("floyd_warshall_phase1")
+            .context("Failed to load phase1 kernel function")?;
+        let phase2_row_func = module
+            .load_function("floyd_warshall_phase2_row")
+            .context("Failed to load phase2_row kernel function")?;
+        let phase2_col_func = module
+            .load_function("floyd_warshall_phase2_col")
+            .context("Failed to load phase2_col kernel function")?;
+        let phase3_func = module
+            .load_function("floyd_warshall_phase3")
+            .context("Failed to load phase3 kernel function")?;
 
         log::info!("Floyd-Warshall GPU module loaded successfully");
 
-        Ok(Self { device })
+        // Get default stream
+        let stream = device.default_stream();
+
+        Ok(Self {
+            context: device,
+            stream,
+            phase1_func,
+            phase2_row_func,
+            phase2_col_func,
+            phase3_func,
+        })
     }
 
     /// Computes all-pairs shortest paths on GPU
@@ -119,9 +143,9 @@ impl FloydWarshallGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::floyd_warshall::FloydWarshallGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = CudaDevice::new(0).unwrap();
+    /// # let device = CudaContext::new(0).unwrap();
     /// # let fw = FloydWarshallGpu::new(Arc::new(device), "kernels/floyd_warshall.ptx").unwrap();
     /// let adjacency = vec![
     ///     vec![1, 2],  // vertex 0 -> neighbors 1, 2
@@ -176,8 +200,8 @@ impl FloydWarshallGpu {
             dist_host.len() * 4
         );
         let dist_device: CudaSlice<f32> = self
-            .device
-            .htod_sync_copy(&dist_host)
+            .stream
+            .clone_htod(&dist_host)
             .context("Failed to copy distance matrix to GPU")?;
 
         // Step 3: Execute blocked Floyd-Warshall algorithm
@@ -188,8 +212,8 @@ impl FloydWarshallGpu {
         // Step 4: Copy result back to host (D2H)
         log::debug!("Copying result back to host");
         let result_flat = self
-            .device
-            .dtoh_sync_copy(&dist_device)
+            .stream
+            .clone_dtoh(&dist_device)
             .context("Failed to copy result from GPU")?;
 
         // Step 5: Convert flat array to 2D matrix
@@ -219,7 +243,7 @@ impl FloydWarshallGpu {
     /// Returns error if kernel launch or synchronization fails
     fn run_blocked_floyd_warshall(
         &self,
-        mut dist_device: CudaSlice<f32>,
+        dist_device: CudaSlice<f32>,
         n: usize,
     ) -> Result<CudaSlice<f32>> {
         let num_blocks = n.div_ceil(BLOCK_SIZE);
@@ -230,24 +254,6 @@ impl FloydWarshallGpu {
             num_blocks,
             BLOCK_SIZE
         );
-
-        // Get kernel functions
-        let phase1_func = self
-            .device
-            .get_func("floyd_warshall", "floyd_warshall_phase1")
-            .context("Failed to get phase1 kernel function")?;
-        let phase2_row_func = self
-            .device
-            .get_func("floyd_warshall", "floyd_warshall_phase2_row")
-            .context("Failed to get phase2_row kernel function")?;
-        let phase2_col_func = self
-            .device
-            .get_func("floyd_warshall", "floyd_warshall_phase2_col")
-            .context("Failed to get phase2_col kernel function")?;
-        let phase3_func = self
-            .device
-            .get_func("floyd_warshall", "floyd_warshall_phase3")
-            .context("Failed to get phase3 kernel function")?;
 
         // Iterate through all pivots
         for k in 0..n {
@@ -261,14 +267,17 @@ impl FloydWarshallGpu {
             };
 
             unsafe {
-                phase1_func.clone().launch(
-                    cfg1,
-                    (&mut dist_device, n as i32, k as i32, pivot_block as i32),
-                )
+                self.stream
+                    .launch_builder(&self.phase1_func)
+                    .arg(&dist_device)
+                    .arg(&(n as i32))
+                    .arg(&(k as i32))
+                    .arg(&(pivot_block as i32))
+                    .launch(cfg1)
+                    .with_context(|| format!("Phase 1 kernel launch failed at pivot {}", k))?;
             }
-            .with_context(|| format!("Phase 1 kernel launch failed at pivot {}", k))?;
 
-            self.device
+            self.stream
                 .synchronize()
                 .context("Phase 1 synchronization failed")?;
 
@@ -280,22 +289,28 @@ impl FloydWarshallGpu {
             };
 
             unsafe {
-                phase2_row_func.clone().launch(
-                    cfg2,
-                    (&mut dist_device, n as i32, k as i32, pivot_block as i32),
-                )
+                self.stream
+                    .launch_builder(&self.phase2_row_func)
+                    .arg(&dist_device)
+                    .arg(&(n as i32))
+                    .arg(&(k as i32))
+                    .arg(&(pivot_block as i32))
+                    .launch(cfg2)
+                    .with_context(|| format!("Phase 2 row kernel launch failed at pivot {}", k))?;
             }
-            .with_context(|| format!("Phase 2 row kernel launch failed at pivot {}", k))?;
 
             unsafe {
-                phase2_col_func.clone().launch(
-                    cfg2,
-                    (&mut dist_device, n as i32, k as i32, pivot_block as i32),
-                )
+                self.stream
+                    .launch_builder(&self.phase2_col_func)
+                    .arg(&dist_device)
+                    .arg(&(n as i32))
+                    .arg(&(k as i32))
+                    .arg(&(pivot_block as i32))
+                    .launch(cfg2)
+                    .with_context(|| format!("Phase 2 col kernel launch failed at pivot {}", k))?;
             }
-            .with_context(|| format!("Phase 2 col kernel launch failed at pivot {}", k))?;
 
-            self.device
+            self.stream
                 .synchronize()
                 .context("Phase 2 synchronization failed")?;
 
@@ -307,14 +322,17 @@ impl FloydWarshallGpu {
             };
 
             unsafe {
-                phase3_func.clone().launch(
-                    cfg3,
-                    (&mut dist_device, n as i32, k as i32, pivot_block as i32),
-                )
+                self.stream
+                    .launch_builder(&self.phase3_func)
+                    .arg(&dist_device)
+                    .arg(&(n as i32))
+                    .arg(&(k as i32))
+                    .arg(&(pivot_block as i32))
+                    .launch(cfg3)
+                    .with_context(|| format!("Phase 3 kernel launch failed at pivot {}", k))?;
             }
-            .with_context(|| format!("Phase 3 kernel launch failed at pivot {}", k))?;
 
-            self.device
+            self.stream
                 .synchronize()
                 .context("Phase 3 synchronization failed")?;
 
@@ -329,8 +347,8 @@ impl FloydWarshallGpu {
     }
 
     /// Returns reference to underlying CUDA device
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 }
 
@@ -357,7 +375,7 @@ mod tests {
     fn test_floyd_warshall_small_graph() {
         env_logger::builder().is_test(true).try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
             .expect("Failed to create FloydWarshallGpu");
 
@@ -382,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_validation_max_vertices() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
             .expect("Failed to create FloydWarshallGpu");
 
@@ -395,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_validation_empty_graph() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let fw = FloydWarshallGpu::new(Arc::new(device), "target/ptx/floyd_warshall.ptx")
             .expect("Failed to create FloydWarshallGpu");
 

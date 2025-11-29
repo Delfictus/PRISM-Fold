@@ -9,7 +9,8 @@
 // REFERENCE: PRISM Spec Section 6.2 "MEC Molecular Dynamics"
 
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::{CudaContext, CudaStream, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 // Constants matching kernel definitions
@@ -74,41 +75,47 @@ pub struct MDResults {
 
 /// Molecular Dynamics GPU executor
 pub struct MolecularDynamicsGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
+    initialize_lattice_kernel: cudarc::driver::CudaFunction,
+    calculate_forces_kernel: cudarc::driver::CudaFunction,
+    integrate_verlet_kernel: cudarc::driver::CudaFunction,
+    complete_verlet_kernel: cudarc::driver::CudaFunction,
+    berendsen_thermostat_kernel: cudarc::driver::CudaFunction,
+    mec_coherence_kernel: cudarc::driver::CudaFunction,
 }
 
 impl MolecularDynamicsGpu {
     /// Create new MD GPU executor and load PTX module with explicit kernel list
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         log::info!("Loading Molecular Dynamics PTX module from: {}", ptx_path);
 
-        // Read PTX file
-        let ptx_code = std::fs::read_to_string(ptx_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read PTX file: {} - {}", ptx_path, e))?;
+        let stream = context.default_stream();
 
-        // Load PTX module with explicit kernel list (cudarc requires this for proper registration)
-        device
-            .load_ptx(
-                ptx_code.into(),
-                "molecular_dynamics",
-                &[
-                    "initialize_lattice_kernel",
-                    "calculate_forces_kernel",
-                    "integrate_verlet_kernel",
-                    "complete_verlet_kernel",
-                    "langevin_thermostat_kernel",
-                    "berendsen_thermostat_kernel",
-                    "build_neighbor_list_kernel",
-                    "compute_properties_kernel",
-                    "mec_coherence_kernel",
-                    "md_performance_metrics",
-                ],
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to load PTX module: {:?}", e))?;
+        // Load PTX module
+        let ptx = Ptx::from_file(ptx_path);
+        let module = context.load_module(ptx)?;
+
+        // Load kernel functions
+        let initialize_lattice_kernel = module.load_function("initialize_lattice_kernel")?;
+        let calculate_forces_kernel = module.load_function("calculate_forces_kernel")?;
+        let integrate_verlet_kernel = module.load_function("integrate_verlet_kernel")?;
+        let complete_verlet_kernel = module.load_function("complete_verlet_kernel")?;
+        let berendsen_thermostat_kernel = module.load_function("berendsen_thermostat_kernel")?;
+        let mec_coherence_kernel = module.load_function("mec_coherence_kernel")?;
 
         log::info!("Molecular Dynamics PTX module loaded successfully");
 
-        Ok(Self { device })
+        Ok(Self {
+            context,
+            stream,
+            initialize_lattice_kernel,
+            calculate_forces_kernel,
+            integrate_verlet_kernel,
+            complete_verlet_kernel,
+            berendsen_thermostat_kernel,
+            mec_coherence_kernel,
+        })
     }
 
     /// Initialize particle system on a lattice using GPU
@@ -127,55 +134,34 @@ impl MolecularDynamicsGpu {
 
         // Allocate GPU memory for particles
         let particle_size = std::mem::size_of::<Particle>();
-        let d_particles = unsafe {
-            self.device
-                .alloc::<u8>(params.num_particles * particle_size)
-        }
-        .map_err(|e| anyhow::anyhow!("Failed to allocate GPU memory for particles: {:?}", e))?;
-
-        // Get kernel function
-        let init_kernel = self
-            .device
-            .get_func("molecular_dynamics", "initialize_lattice_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get initialize_lattice_kernel function"))?;
+        let d_particles = self.stream.alloc_zeros::<u8>(params.num_particles * particle_size)?;
 
         // Launch parameters
         let threads_per_block = 256;
         let num_blocks = (params.num_particles + threads_per_block - 1) / threads_per_block;
 
         // Launch initialization kernel
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_blocks as u32, 1, 1),
+            block_dim: (threads_per_block as u32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
         unsafe {
-            use cudarc::driver::LaunchAsync;
-            init_kernel
-                .launch(
-                    cudarc::driver::LaunchConfig {
-                        grid_dim: (num_blocks as u32, 1, 1),
-                        block_dim: (threads_per_block as u32, 1, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    (
-                        &d_particles,
-                        particles_per_dim,
-                        params.box_size,
-                        params.temperature,
-                        params.seed,
-                    ),
-                )
-                .map_err(|e| {
-                    anyhow::anyhow!("Failed to launch initialize_lattice_kernel: {:?}", e)
-                })?;
+            self.stream.launch_builder(&self.initialize_lattice_kernel)
+                .arg(&d_particles)
+                .arg(&particles_per_dim)
+                .arg(&params.box_size)
+                .arg(&params.temperature)
+                .arg(&params.seed)
+                .launch(cfg)?;
         }
 
-        // Synchronize device
-        self.device
-            .synchronize()
-            .map_err(|e| anyhow::anyhow!("Failed to synchronize after initialization: {:?}", e))?;
+        // Synchronize stream
+        self.stream.synchronize()?;
 
         // Copy particles back to CPU
-        let particle_bytes = self
-            .device
-            .dtoh_sync_copy(&d_particles)
-            .map_err(|e| anyhow::anyhow!("Failed to copy particles from GPU: {:?}", e))?;
+        let _particle_bytes = self.stream.clone_dtoh(&d_particles)?;
 
         // Convert bytes to particles
         let mut particles = Vec::new();
@@ -212,158 +198,105 @@ impl MolecularDynamicsGpu {
         let particle_size = std::mem::size_of::<Particle>();
         let num_particles = params.num_particles;
 
-        // Allocate GPU memory for particles
-        let mut d_particles = unsafe { self.device.alloc::<u8>(num_particles * particle_size) }
-            .map_err(|e| anyhow::anyhow!("Failed to allocate particle buffer: {:?}", e))?;
+        // Allocate GPU memory for particles (will be overwritten by htod)
+        // Note: d_particles will be reassigned from htod, so initial allocation is not needed here
 
         // Allocate GPU memory for energies and metrics
-        let mut d_kinetic_energy = self.device.alloc_zeros::<f32>(1)?;
-        let mut d_potential_energy = self.device.alloc_zeros::<f32>(1)?;
-        let mut d_temperature = self.device.alloc_zeros::<f32>(1)?;
+        let d_kinetic_energy = self.stream.alloc_zeros::<f32>(1)?;
+        let d_potential_energy = self.stream.alloc_zeros::<f32>(1)?;
+        let d_temperature = self.stream.alloc_zeros::<f32>(1)?;
 
         // Allocate neighbor list data
         const MAX_NEIGHBORS: usize = 128;
-        let mut d_neighbor_list =
-            unsafe { self.device.alloc::<i32>(num_particles * MAX_NEIGHBORS) }?;
-        let mut d_neighbor_counts = self.device.alloc_zeros::<i32>(num_particles)?;
+        let d_neighbor_list = self.stream.alloc_zeros::<i32>(num_particles * MAX_NEIGHBORS)?;
+        let d_neighbor_counts = self.stream.alloc_zeros::<i32>(num_particles)?;
 
         // Copy particles to GPU
         let particle_bytes: Vec<u8> = particles
             .iter()
-            .flat_map(|p| {
+            .flat_map(|_p| {
                 // Simple byte representation (would need proper serialization)
                 vec![0u8; particle_size]
             })
             .collect();
-        self.device
-            .htod_sync_copy_into(&particle_bytes, &mut d_particles)?;
+        let d_particles = self.stream.clone_htod(&particle_bytes)?;
 
         let threads_per_block = 256;
         let num_blocks = ((num_particles + threads_per_block - 1) / threads_per_block) as u32;
 
-        // MD integration loop - get functions as needed to avoid move issues
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_blocks, 1, 1),
+            block_dim: (threads_per_block as u32, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        // MD integration loop
         for step in 0..params.integration_steps {
-            // Calculate forces (simplified parameter passing)
+            // Calculate forces
             unsafe {
-                use cudarc::driver::LaunchAsync;
-                let calc_forces_fn = self
-                    .device
-                    .get_func("molecular_dynamics", "calculate_forces_kernel")
-                    .ok_or_else(|| anyhow::anyhow!("Failed to get calculate_forces_kernel"))?;
-
-                calc_forces_fn
-                    .launch(
-                        cudarc::driver::LaunchConfig {
-                            grid_dim: (num_blocks, 1, 1),
-                            block_dim: (threads_per_block as u32, 1, 1),
-                            shared_mem_bytes: 0,
-                        },
-                        (
-                            &d_particles,
-                            &d_potential_energy,
-                            &d_neighbor_list,
-                            &d_neighbor_counts,
-                            num_particles as i32,
-                            params.timestep,
-                            params.temperature,
-                            params.box_size,
-                            params.epsilon,
-                            params.sigma,
-                            params.damping,
-                            params.coupling_strength,
-                        ),
-                    )
-                    .map_err(|e| anyhow::anyhow!("Force calculation failed: {:?}", e))?;
+                self.stream.launch_builder(&self.calculate_forces_kernel)
+                    .arg(&d_particles)
+                    .arg(&d_potential_energy)
+                    .arg(&d_neighbor_list)
+                    .arg(&d_neighbor_counts)
+                    .arg(&(num_particles as i32))
+                    .arg(&params.timestep)
+                    .arg(&params.temperature)
+                    .arg(&params.box_size)
+                    .arg(&params.epsilon)
+                    .arg(&params.sigma)
+                    .arg(&params.damping)
+                    .arg(&params.coupling_strength)
+                    .launch(cfg)?;
             }
 
-            // Integrate positions (Verlet step 1) - simplified
+            // Integrate positions (Verlet step 1)
             unsafe {
-                use cudarc::driver::LaunchAsync;
-                let integrate_fn = self
-                    .device
-                    .get_func("molecular_dynamics", "integrate_verlet_kernel")
-                    .ok_or_else(|| anyhow::anyhow!("Failed to get integrate_verlet_kernel"))?;
-
-                integrate_fn
-                    .launch(
-                        cudarc::driver::LaunchConfig {
-                            grid_dim: (num_blocks, 1, 1),
-                            block_dim: (threads_per_block as u32, 1, 1),
-                            shared_mem_bytes: 0,
-                        },
-                        (
-                            &d_particles,
-                            &d_kinetic_energy,
-                            num_particles as i32,
-                            params.timestep,
-                            params.temperature,
-                            params.box_size,
-                            params.epsilon,
-                            params.sigma,
-                            params.damping,
-                            params.coupling_strength,
-                        ),
-                    )
-                    .map_err(|e| anyhow::anyhow!("Integration failed: {:?}", e))?;
+                self.stream.launch_builder(&self.integrate_verlet_kernel)
+                    .arg(&d_particles)
+                    .arg(&d_kinetic_energy)
+                    .arg(&(num_particles as i32))
+                    .arg(&params.timestep)
+                    .arg(&params.temperature)
+                    .arg(&params.box_size)
+                    .arg(&params.epsilon)
+                    .arg(&params.sigma)
+                    .arg(&params.damping)
+                    .arg(&params.coupling_strength)
+                    .launch(cfg)?;
             }
 
-            // Complete Verlet step 2 - simplified
+            // Complete Verlet step 2
             unsafe {
-                use cudarc::driver::LaunchAsync;
-                let complete_verlet_fn = self
-                    .device
-                    .get_func("molecular_dynamics", "complete_verlet_kernel")
-                    .ok_or_else(|| anyhow::anyhow!("Failed to get complete_verlet_kernel"))?;
-
-                complete_verlet_fn
-                    .launch(
-                        cudarc::driver::LaunchConfig {
-                            grid_dim: (num_blocks, 1, 1),
-                            block_dim: (threads_per_block as u32, 1, 1),
-                            shared_mem_bytes: 0,
-                        },
-                        (&d_particles, num_particles as i32, params.timestep),
-                    )
-                    .map_err(|e| anyhow::anyhow!("Verlet completion failed: {:?}", e))?;
+                self.stream.launch_builder(&self.complete_verlet_kernel)
+                    .arg(&d_particles)
+                    .arg(&(num_particles as i32))
+                    .arg(&params.timestep)
+                    .launch(cfg)?;
             }
 
             // Apply thermostat (every 10 steps)
             if step % 10 == 0 {
                 unsafe {
-                    use cudarc::driver::LaunchAsync;
-                    let thermostat_fn = self
-                        .device
-                        .get_func("molecular_dynamics", "berendsen_thermostat_kernel")
-                        .ok_or_else(|| anyhow::anyhow!("Failed to get thermostat kernel"))?;
-
-                    thermostat_fn
-                        .launch(
-                            cudarc::driver::LaunchConfig {
-                                grid_dim: (num_blocks, 1, 1),
-                                block_dim: (threads_per_block as u32, 1, 1),
-                                shared_mem_bytes: 0,
-                            },
-                            (
-                                &d_particles,
-                                params.temperature,
-                                params.temperature,
-                                1.0f32, // tau_t
-                                params.timestep,
-                                num_particles as i32,
-                            ),
-                        )
-                        .map_err(|e| anyhow::anyhow!("Thermostat failed: {:?}", e))?;
+                    self.stream.launch_builder(&self.berendsen_thermostat_kernel)
+                        .arg(&d_particles)
+                        .arg(&params.temperature)
+                        .arg(&params.temperature)
+                        .arg(&1.0f32)
+                        .arg(&params.timestep)
+                        .arg(&(num_particles as i32))
+                        .launch(cfg)?;
                 }
             }
         }
 
-        // Synchronize device
-        self.device.synchronize()?;
+        // Synchronize stream
+        self.stream.synchronize()?;
 
         // Copy energies back from GPU
-        let kinetic = self.device.dtoh_sync_copy(&d_kinetic_energy)?;
-        let potential = self.device.dtoh_sync_copy(&d_potential_energy)?;
-        let temp = self.device.dtoh_sync_copy(&d_temperature)?;
+        let kinetic = self.stream.clone_dtoh(&d_kinetic_energy)?;
+        let potential = self.stream.clone_dtoh(&d_potential_energy)?;
+        let temp = self.stream.clone_dtoh(&d_temperature)?;
 
         let kinetic_energy = kinetic[0];
         let potential_energy = potential[0];
@@ -401,45 +334,33 @@ impl MolecularDynamicsGpu {
     ) -> Result<f32> {
         // Allocate GPU memory for coherence matrix and entanglement measure
         let num_particles = params.num_particles;
-        let d_coherence_matrix = self
-            .device
-            .alloc_zeros::<f32>(num_particles * num_particles)?;
-        let d_entanglement = self.device.alloc_zeros::<f32>(1)?;
-
-        // Get coherence kernel
-        let coherence_fn = self
-            .device
-            .get_func("molecular_dynamics", "mec_coherence_kernel")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get mec_coherence_kernel"))?;
+        let d_coherence_matrix = self.stream.alloc_zeros::<f32>(num_particles * num_particles)?;
+        let d_entanglement = self.stream.alloc_zeros::<f32>(1)?;
 
         let total_pairs = (num_particles * num_particles) as u32;
         let threads_per_block = 256u32;
         let num_blocks = (total_pairs + threads_per_block - 1) / threads_per_block;
 
         // Launch coherence kernel
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (num_blocks, 1, 1),
+            block_dim: (threads_per_block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
         unsafe {
-            use cudarc::driver::LaunchAsync;
-            coherence_fn
-                .launch(
-                    cudarc::driver::LaunchConfig {
-                        grid_dim: (num_blocks, 1, 1),
-                        block_dim: (threads_per_block, 1, 1),
-                        shared_mem_bytes: 0,
-                    },
-                    (
-                        d_particles,
-                        &d_coherence_matrix,
-                        &d_entanglement,
-                        num_particles as i32,
-                        10.0f32, // interaction_radius
-                    ),
-                )
-                .map_err(|e| anyhow::anyhow!("Coherence kernel failed: {:?}", e))?;
+            self.stream.launch_builder(&self.mec_coherence_kernel)
+                .arg(d_particles)
+                .arg(&d_coherence_matrix)
+                .arg(&d_entanglement)
+                .arg(&(num_particles as i32))
+                .arg(&10.0f32)
+                .launch(cfg)?;
         }
 
         // Synchronize and copy result
-        self.device.synchronize()?;
-        let entanglement = self.device.dtoh_sync_copy(&d_entanglement)?;
+        self.stream.synchronize()?;
+        let entanglement = self.stream.clone_dtoh(&d_entanglement)?;
 
         // Normalize coherence by number of pairs
         let coherence = (entanglement[0] / (num_particles as f32)).min(1.0);
@@ -453,17 +374,13 @@ impl MolecularDynamicsGpu {
         params: &MDParams,
     ) -> Result<f32> {
         let particle_size = std::mem::size_of::<Particle>();
-        let num_particles = particles.len();
 
         // Allocate and copy particles to GPU
-        let mut d_particles = unsafe { self.device.alloc::<u8>(num_particles * particle_size) }?;
-
         let particle_bytes: Vec<u8> = particles
             .iter()
             .flat_map(|_p| vec![0u8; particle_size])
             .collect();
-        self.device
-            .htod_sync_copy_into(&particle_bytes, &mut d_particles)?;
+        let d_particles = self.stream.clone_htod(&particle_bytes)?;
 
         self.compute_mec_coherence_internal(&d_particles, params)
     }

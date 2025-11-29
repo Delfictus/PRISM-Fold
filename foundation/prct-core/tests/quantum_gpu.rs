@@ -4,7 +4,7 @@
 
 #[cfg(all(feature = "cuda", test))]
 mod quantum_gpu_tests {
-    use cudarc::driver::CudaDevice;
+    use cudarc::driver::CudaContext;
     use prct_core::*;
     use shared_types::*;
     use std::sync::Arc;
@@ -124,7 +124,7 @@ mod quantum_gpu_tests {
     #[test]
     fn test_gpu_qubo_solver_init() {
         // Test GPU solver initialization
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let device = Arc::new(device);
 
         let result = gpu_quantum_annealing::GpuQuboSolver::new(device);
@@ -177,7 +177,7 @@ mod quantum_gpu_tests {
     #[ignore] // Requires GPU and compiled PTX - run with: cargo test --features cuda --test quantum_gpu -- --ignored
     fn test_gpu_qubo_triangle() {
         // End-to-end test: solve triangle coloring on GPU
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let device = Arc::new(device);
 
         let graph = create_triangle_graph();
@@ -235,7 +235,7 @@ mod quantum_gpu_tests {
     #[ignore] // Requires GPU and compiled PTX
     fn test_gpu_qubo_bipartite() {
         // End-to-end test: solve bipartite coloring on GPU
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let device = Arc::new(device);
 
         let graph = create_bipartite_graph();
@@ -299,7 +299,7 @@ mod quantum_gpu_tests {
     #[test]
     fn test_quantum_coloring_solver_gpu_dispatch() {
         // Test that QuantumColoringSolver dispatches to GPU when device is available
-        let device = CudaDevice::new(0).ok().map(Arc::new);
+        let device = CudaContext::new(0).ok().map(Arc::new);
 
         let mut solver = QuantumColoringSolver::new(device.clone()).unwrap();
 

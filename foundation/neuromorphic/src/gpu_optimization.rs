@@ -73,7 +73,8 @@ pub enum Difficulty {
 
 /// GPU performance profiler optimized for RTX 5070
 pub struct GpuProfiler {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
     metrics: DashMap<String, PerformanceMetrics>,
     profiling_start: Option<Instant>,
     enable_detailed_profiling: bool,
@@ -81,9 +82,11 @@ pub struct GpuProfiler {
 
 impl GpuProfiler {
     /// Create new GPU profiler
-    pub fn new(device: Arc<CudaDevice>, enable_detailed: bool) -> Self {
+    pub fn new(context: Arc<CudaContext>, enable_detailed: bool) -> Self {
+        let stream = Arc::new(context.default_stream());
         Self {
-            device,
+            context,
+            stream,
             metrics: DashMap::new(),
             profiling_start: None,
             enable_detailed_profiling: enable_detailed,
@@ -107,11 +110,11 @@ impl GpuProfiler {
 
         let start = Instant::now();
 
-        // Execute operation and measure time (cudarc 0.9: use CPU timing)
+        // Execute operation and measure time
         let result = operation()?;
 
-        // Synchronize device to get accurate timing
-        self.device.synchronize()?;
+        // Synchronize stream to get accurate timing (cudarc 0.18.1)
+        self.stream.synchronize()?;
 
         let total_time = start.elapsed().as_micros() as f64;
 

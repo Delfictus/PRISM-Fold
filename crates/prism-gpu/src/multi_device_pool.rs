@@ -28,7 +28,7 @@
 //! ```
 
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 use crate::stream_manager::StreamPool;
@@ -89,7 +89,7 @@ impl Default for P2PCapability {
 /// across all GPUs in the pool.
 pub struct MultiGpuDevicePool {
     /// CUDA device contexts
-    devices: Vec<Arc<CudaDevice>>,
+    devices: Vec<Arc<CudaContext>>,
 
     /// Stream pools for each GPU
     stream_pools: Vec<StreamPool>,
@@ -127,9 +127,9 @@ impl MultiGpuDevicePool {
         let mut stream_pools = Vec::with_capacity(device_ids.len());
 
         // Create contexts for each device
-        // Note: CudaDevice::new returns Arc<CudaDevice> in cudarc 0.9
+        // Note: CudaContext::new returns Arc<CudaContext> in cudarc 0.9
         for &device_id in device_ids {
-            let device = CudaDevice::new(device_id)?;
+            let device = CudaContext::new(device_id)?;
             stream_pools.push(StreamPool::new(device.clone())?);
             devices.push(device);
         }
@@ -193,7 +193,7 @@ impl MultiGpuDevicePool {
     /// # Panics
     ///
     /// Panics if index is out of bounds.
-    pub fn device(&self, idx: usize) -> &Arc<CudaDevice> {
+    pub fn device(&self, idx: usize) -> &Arc<CudaContext> {
         &self.devices[idx]
     }
 
@@ -270,7 +270,7 @@ impl MultiGpuDevicePool {
     }
 
     /// Get primary device context
-    pub fn primary_context(&self) -> &Arc<CudaDevice> {
+    pub fn primary_context(&self) -> &Arc<CudaContext> {
         &self.devices[self.primary_device]
     }
 
@@ -382,7 +382,7 @@ impl MultiGpuDevicePool {
     }
 
     /// Get all devices
-    pub fn devices(&self) -> &[Arc<CudaDevice>] {
+    pub fn devices(&self) -> &[Arc<CudaContext>] {
         &self.devices
     }
 

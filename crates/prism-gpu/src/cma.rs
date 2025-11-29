@@ -14,7 +14,8 @@
 //! REFERENCE: PRISM Spec Section 2.4 "CMA-ES Ensemble Exchange"
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaSlice, CudaStream, CudaFunction, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// CMA-ES ensemble parameters
@@ -92,7 +93,16 @@ impl Default for CmaEnsembleParams {
 
 /// CMA-ES Ensemble GPU accelerator
 pub struct CmaEnsembleGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
+
+    // Kernel functions
+    cma_evolution_kernel: CudaFunction,
+    replica_exchange_kernel: CudaFunction,
+    diversity_kernel: CudaFunction,
+    adaptive_parameters_kernel: CudaFunction,
+    convergence_detection_kernel: CudaFunction,
+    cma_performance_metrics: CudaFunction,
 
     // Device memory
     populations: CudaSlice<f32>,
@@ -114,7 +124,7 @@ pub struct CmaEnsembleGpu {
 impl CmaEnsembleGpu {
     /// Creates a new CMA-ES ensemble GPU accelerator
     pub fn new(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         num_replicas: usize,
         dimensions: usize,
         population_size: Option<usize>,
@@ -147,27 +157,24 @@ impl CmaEnsembleGpu {
             pop_size
         );
 
-        // Load PTX module with explicit kernel list from file system
-        let ptx_path = std::path::Path::new("target/ptx/ensemble_exchange.ptx");
-        let ptx = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read CMA Ensemble PTX file: {:?}", ptx_path))?;
-        device
-            .load_ptx(
-                ptx.into(),
-                "ensemble_exchange",
-                &[
-                    "cma_evolution_kernel",
-                    "replica_exchange_kernel",
-                    "island_migration_kernel",
-                    "diversity_kernel",
-                    "adaptive_parameters_kernel",
-                    "convergence_detection_kernel",
-                    "cma_performance_metrics",
-                ],
-            )
-            .context("Failed to load CMA Ensemble PTX module")?;
+        // Get stream from context
+        let stream = context.default_stream();
 
-        log::debug!("CMA Ensemble PTX module loaded with 7 kernels");
+        // Load PTX module with explicit kernel list from file system
+        let ptx_path = "target/ptx/ensemble_exchange.ptx";
+
+        let module = context.load_module(Ptx::from_file(ptx_path))
+            .with_context(|| format!("Failed to load CMA Ensemble PTX module from {}", ptx_path))?;
+
+        // Load kernel functions
+        let cma_evolution_kernel = module.load_function("cma_evolution_kernel")?;
+        let replica_exchange_kernel = module.load_function("replica_exchange_kernel")?;
+        let diversity_kernel = module.load_function("diversity_kernel")?;
+        let adaptive_parameters_kernel = module.load_function("adaptive_parameters_kernel")?;
+        let convergence_detection_kernel = module.load_function("convergence_detection_kernel")?;
+        let cma_performance_metrics = module.load_function("cma_performance_metrics")?;
+
+        log::debug!("CMA Ensemble PTX module loaded with 6 kernels");
 
         // Initialize parameters
         let mut params = CmaEnsembleParams::default();
@@ -178,51 +185,51 @@ impl CmaEnsembleGpu {
 
         // Allocate device memory
         let pop_total_size = num_replicas * pop_size * dimensions;
-        let populations = device
+        let populations = stream
             .alloc_zeros::<f32>(pop_total_size)
             .context("Failed to allocate populations")?;
 
         let fitness_size = num_replicas * pop_size;
-        let fitness_values = device
+        let fitness_values = stream
             .alloc_zeros::<f32>(fitness_size)
             .context("Failed to allocate fitness values")?;
 
         let mean_size = num_replicas * dimensions;
-        let mean_vectors = device
+        let mean_vectors = stream
             .alloc_zeros::<f32>(mean_size)
             .context("Failed to allocate mean vectors")?;
 
         let cov_size = num_replicas * dimensions * dimensions;
-        let mut covariance_matrices = device
+        let _covariance_matrices_temp = stream
             .alloc_zeros::<f32>(cov_size)
             .context("Failed to allocate covariance matrices")?;
 
-        let evolution_paths_sigma = device
+        let evolution_paths_sigma = stream
             .alloc_zeros::<f32>(mean_size)
             .context("Failed to allocate evolution paths sigma")?;
 
-        let evolution_paths_c = device
+        let evolution_paths_c = stream
             .alloc_zeros::<f32>(mean_size)
             .context("Failed to allocate evolution paths c")?;
 
-        let mut sigmas = device
+        let _sigmas_temp = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate sigmas")?;
 
-        let generations = device
+        let generations = stream
             .alloc_zeros::<i32>(num_replicas)
             .context("Failed to allocate generation counters")?;
 
-        let exchange_matrix = device
+        let exchange_matrix = stream
             .alloc_zeros::<f32>(num_replicas * num_replicas)
             .context("Failed to allocate exchange matrix")?;
 
         let num_pairs = num_replicas * (num_replicas - 1) / 2;
-        let exchange_counts = device
+        let exchange_counts = stream
             .alloc_zeros::<i32>(num_pairs)
             .context("Failed to allocate exchange counts")?;
 
-        let diversity_metrics = device
+        let diversity_metrics = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate diversity metrics")?;
 
@@ -233,13 +240,20 @@ impl CmaEnsembleGpu {
                 init_cov[r * dimensions * dimensions + i * dimensions + i] = 1.0;
             }
         }
-        device.htod_sync_copy_into(&init_cov, &mut covariance_matrices)?;
+        let covariance_matrices = stream.clone_htod(&init_cov)?;
 
         let init_sigmas = vec![1.0f32; num_replicas];
-        device.htod_sync_copy_into(&init_sigmas, &mut sigmas)?;
+        let sigmas = stream.clone_htod(&init_sigmas)?;
 
         Ok(Self {
-            device,
+            context,
+            stream,
+            cma_evolution_kernel,
+            replica_exchange_kernel,
+            diversity_kernel,
+            adaptive_parameters_kernel,
+            convergence_detection_kernel,
+            cma_performance_metrics,
             populations,
             fitness_values,
             mean_vectors,
@@ -269,34 +283,26 @@ impl CmaEnsembleGpu {
             shared_mem_bytes: shared_size as u32,
         };
 
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "cma_evolution_kernel")
-            .context("Failed to get evolution kernel")?;
-
         // Pass individual parameters instead of struct
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.populations,
-                    &self.fitness_values,
-                    &self.mean_vectors,
-                    &self.covariance_matrices,
-                    &self.evolution_paths_sigma,
-                    &self.evolution_paths_c,
-                    &self.sigmas,
-                    &self.generations,
-                    self.params.num_replicas,
-                    self.params.population_size,
-                    self.params.dimensions,
-                    self.params.sigma,
-                ),
-            )
+            self.stream.launch_builder(&self.cma_evolution_kernel)
+                .arg(&self.populations)
+                .arg(&self.fitness_values)
+                .arg(&self.mean_vectors)
+                .arg(&self.covariance_matrices)
+                .arg(&self.evolution_paths_sigma)
+                .arg(&self.evolution_paths_c)
+                .arg(&self.sigmas)
+                .arg(&self.generations)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.population_size)
+                .arg(&self.params.dimensions)
+                .arg(&self.params.sigma)
+                .launch(config)
         }
         .context("Failed to launch evolution kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
@@ -312,29 +318,21 @@ impl CmaEnsembleGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "replica_exchange_kernel")
-            .context("Failed to get exchange kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.populations,
-                    &self.fitness_values,
-                    &self.mean_vectors,
-                    &self.sigmas,
-                    &self.exchange_matrix,
-                    &self.exchange_counts,
-                    self.params.num_replicas,
-                    self.params.exchange_rate,
-                ),
-            )
+            self.stream.launch_builder(&self.replica_exchange_kernel)
+                .arg(&self.populations)
+                .arg(&self.fitness_values)
+                .arg(&self.mean_vectors)
+                .arg(&self.sigmas)
+                .arg(&self.exchange_matrix)
+                .arg(&self.exchange_counts)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.exchange_rate)
+                .launch(config)
         }
         .context("Failed to launch exchange kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
@@ -352,31 +350,25 @@ impl CmaEnsembleGpu {
 
         // Allocate crowding distances
         let crowding_size = (self.params.num_replicas * self.params.population_size) as usize;
-        let crowding_distances = self.device.alloc_zeros::<f32>(crowding_size)?;
-
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "diversity_kernel")
-            .context("Failed to get diversity kernel")?;
+        let crowding_distances = self.stream.alloc_zeros::<f32>(crowding_size)?;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.populations,
-                    &self.diversity_metrics,
-                    &crowding_distances,
-                    self.params.num_replicas,
-                    self.params.population_size,
-                    self.params.dimensions,
-                ),
-            )
+            self.stream.launch_builder(&self.diversity_kernel)
+                .arg(&self.populations)
+                .arg(&self.diversity_metrics)
+                .arg(&crowding_distances)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.population_size)
+                .arg(&self.params.dimensions)
+                .launch(config)
         }
         .context("Failed to launch diversity kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        Ok(self.device.dtoh_sync_copy(&self.diversity_metrics)?)
+        let mut result = vec![0.0f32; self.params.num_replicas as usize];
+        self.stream.memcpy_dtoh(&self.diversity_metrics, &mut result)?;
+        Ok(result)
     }
 
     /// Adapts parameters based on performance metrics
@@ -394,31 +386,24 @@ impl CmaEnsembleGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "adaptive_parameters_kernel")
-            .context("Failed to get adaptive parameters kernel")?;
-
         // Get current generation
-        let gens = self.device.dtoh_sync_copy(&self.generations)?;
+        let mut gens = vec![0i32; self.params.num_replicas as usize];
+        self.stream.memcpy_dtoh(&self.generations, &mut gens)?;
         let avg_gen = gens.iter().sum::<i32>() / self.params.num_replicas;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.sigmas,
-                    &self.fitness_values,
-                    &self.diversity_metrics,
-                    &success_rates,
-                    avg_gen,
-                    self.params.num_replicas,
-                ),
-            )
+            self.stream.launch_builder(&self.adaptive_parameters_kernel)
+                .arg(&self.sigmas)
+                .arg(&self.fitness_values)
+                .arg(&self.diversity_metrics)
+                .arg(&success_rates)
+                .arg(&avg_gen)
+                .arg(&self.params.num_replicas)
+                .launch(config)
         }
         .context("Failed to launch adaptive parameters kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
         // Note: In production, we would download adapted parameters from GPU
         // For now, simplified version without struct passing
@@ -429,10 +414,10 @@ impl CmaEnsembleGpu {
     /// Checks convergence status of all replicas
     pub fn check_convergence(&self, fitness_tol: f32, diversity_tol: f32) -> Result<Vec<bool>> {
         let convergence_flags = self
-            .device
+            .stream
             .alloc_zeros::<i32>(self.params.num_replicas as usize)?;
         let convergence_metrics = self
-            .device
+            .stream
             .alloc_zeros::<f32>(self.params.num_replicas as usize)?;
 
         let threads_per_block = 256;
@@ -445,38 +430,33 @@ impl CmaEnsembleGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "convergence_detection_kernel")
-            .context("Failed to get convergence kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.fitness_values,
-                    &self.diversity_metrics,
-                    &self.sigmas,
-                    &convergence_flags,
-                    &convergence_metrics,
-                    self.params.num_replicas,
-                    fitness_tol,
-                    diversity_tol,
-                ),
-            )
+            self.stream.launch_builder(&self.convergence_detection_kernel)
+                .arg(&self.fitness_values)
+                .arg(&self.diversity_metrics)
+                .arg(&self.sigmas)
+                .arg(&convergence_flags)
+                .arg(&convergence_metrics)
+                .arg(&self.params.num_replicas)
+                .arg(&fitness_tol)
+                .arg(&diversity_tol)
+                .launch(config)
         }
         .context("Failed to launch convergence kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let flags = self.device.dtoh_sync_copy(&convergence_flags)?;
+        let mut flags = vec![0i32; self.params.num_replicas as usize];
+        self.stream.memcpy_dtoh(&convergence_flags, &mut flags)?;
         Ok(flags.iter().map(|&f| f != 0).collect())
     }
 
     /// Gets the best solution across all replicas
     pub fn get_best_solution(&self) -> Result<(Vec<f32>, f32)> {
         // Download fitness values
-        let fitness = self.device.dtoh_sync_copy(&self.fitness_values)?;
+        let fitness_size = (self.params.num_replicas * self.params.population_size) as usize;
+        let mut fitness = vec![0.0f32; fitness_size];
+        self.stream.memcpy_dtoh(&self.fitness_values, &mut fitness)?;
 
         // Find global best
         let (best_idx, &best_fitness) = fitness
@@ -490,7 +470,9 @@ impl CmaEnsembleGpu {
         let individual_idx = best_idx % self.params.population_size as usize;
 
         // Download best individual
-        let populations = self.device.dtoh_sync_copy(&self.populations)?;
+        let pop_size = (self.params.num_replicas * self.params.population_size * self.params.dimensions) as usize;
+        let mut populations = vec![0.0f32; pop_size];
+        self.stream.memcpy_dtoh(&self.populations, &mut populations)?;
         let start = (replica_idx * self.params.population_size as usize + individual_idx)
             * self.params.dimensions as usize;
         let end = start + self.params.dimensions as usize;
@@ -500,7 +482,7 @@ impl CmaEnsembleGpu {
 
     /// Gets performance metrics
     pub fn get_performance_metrics(&self) -> Result<CmaMetrics> {
-        let metrics = self.device.alloc_zeros::<f32>(4)?;
+        let metrics = self.stream.alloc_zeros::<f32>(4)?;
 
         let config = LaunchConfig {
             grid_dim: (1, 1, 1),
@@ -508,29 +490,22 @@ impl CmaEnsembleGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("ensemble_exchange", "cma_performance_metrics")
-            .context("Failed to get metrics kernel")?;
-
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.fitness_values,
-                    &self.diversity_metrics,
-                    &self.exchange_counts,
-                    &self.generations,
-                    &metrics,
-                    self.params.num_replicas,
-                ),
-            )
+            self.stream.launch_builder(&self.cma_performance_metrics)
+                .arg(&self.fitness_values)
+                .arg(&self.diversity_metrics)
+                .arg(&self.exchange_counts)
+                .arg(&self.generations)
+                .arg(&metrics)
+                .arg(&self.params.num_replicas)
+                .launch(config)
         }
         .context("Failed to launch metrics kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let metrics_vec = self.device.dtoh_sync_copy(&metrics)?;
+        let mut metrics_vec = vec![0.0f32; 4];
+        self.stream.memcpy_dtoh(&metrics, &mut metrics_vec)?;
 
         Ok(CmaMetrics {
             best_fitness: metrics_vec[0],
@@ -546,9 +521,12 @@ impl CmaEnsembleGpu {
         F: Fn(&[f32]) -> f32,
     {
         // Download populations
-        let populations = self.device.dtoh_sync_copy(&self.populations)?;
-        let mut fitness =
-            vec![0.0f32; (self.params.num_replicas * self.params.population_size) as usize];
+        let pop_size = (self.params.num_replicas * self.params.population_size * self.params.dimensions) as usize;
+        let mut populations = vec![0.0f32; pop_size];
+        self.stream.memcpy_dtoh(&self.populations, &mut populations)?;
+
+        let fitness_size = (self.params.num_replicas * self.params.population_size) as usize;
+        let mut fitness = vec![0.0f32; fitness_size];
 
         // Evaluate each individual
         for i in 0..fitness.len() {
@@ -557,9 +535,8 @@ impl CmaEnsembleGpu {
             fitness[i] = eval_fn(&populations[start..end]);
         }
 
-        // Upload fitness values
-        self.device
-            .htod_sync_copy_into(&fitness, &mut self.fitness_values)?;
+        // Upload fitness values - allocate new slice from host data
+        self.fitness_values = self.stream.clone_htod(&fitness)?;
 
         Ok(())
     }
@@ -568,14 +545,10 @@ impl CmaEnsembleGpu {
     fn compute_success_rates(&self) -> Result<CudaSlice<f32>> {
         // Simplified: count improving offspring
         // In practice, would track parent-offspring comparisons
-        let mut success_rates_slice = self
-            .device
-            .alloc_zeros::<f32>(self.params.num_replicas as usize)?;
 
         // Placeholder: set to 0.2 (target rate)
         let rates = vec![0.2f32; self.params.num_replicas as usize];
-        self.device
-            .htod_sync_copy_into(&rates, &mut success_rates_slice)?;
+        let success_rates_slice = self.stream.clone_htod(&rates)?;
 
         Ok(success_rates_slice)
     }
@@ -607,7 +580,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_cma_initialization() {
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let cma = CmaEnsembleGpu::new(Arc::new(device), 4, 50, None);
         assert!(cma.is_ok());
     }
@@ -615,7 +588,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_cma_evolution() {
-        let device = Arc::new(CudaDevice::new(0).unwrap());
+        let device = Arc::new(CudaContext::new(0).unwrap());
         let mut cma = CmaEnsembleGpu::new(device, 2, 30, Some(20)).unwrap();
 
         // Simple sphere function

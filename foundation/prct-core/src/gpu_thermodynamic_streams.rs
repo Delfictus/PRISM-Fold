@@ -17,11 +17,8 @@ use std::sync::Arc;
 
 /// Thermodynamic context with multi-stream support for parallel tempering
 pub struct ThermodynamicContext {
-    /// Shared CUDA device
-    device: Arc<CudaDevice>,
-
-    /// One stream per replica for true parallel execution
-    streams: Vec<CudaStream>,
+    /// Shared CUDA context
+    context: Arc<CudaContext>,
 
     /// Number of temperature replicas
     num_replicas: usize,
@@ -46,86 +43,50 @@ impl ThermodynamicContext {
     /// # Returns
     /// Context with one stream per replica for parallel execution
     pub fn new(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         num_replicas: usize,
         ptx_path: &str,
     ) -> Result<Self> {
         println!(
-            "[THERMO-STREAMS] Creating context with {} replicas (one stream per replica)",
+            "[THERMO-STREAMS] Creating context with {} replicas",
             num_replicas
         );
 
         // Load PTX module
         let ptx = Ptx::from_file(ptx_path);
-        device
-            .load_ptx(
-                ptx,
-                "thermodynamic_module",
-                &[
-                    "initialize_oscillators_kernel",
-                    "compute_coupling_forces_kernel",
-                    "evolve_oscillators_kernel",
-                    "evolve_oscillators_with_conflicts_kernel",
-                    "compute_energy_kernel",
-                    "compute_conflicts_kernel",
-                ],
-            )
+        let module = context
+            .load_module(ptx)
             .map_err(|e| PRCTError::GpuError(format!("Failed to load thermo kernels: {}", e)))?;
 
-        // Create one stream per replica for TRUE parallel execution
-        let streams: Vec<CudaStream> = (0..num_replicas)
-            .map(|i| {
-                device.fork_default_stream().map_err(|e| {
-                    PRCTError::GpuError(format!(
-                        "Failed to create stream for replica {}: {}",
-                        i, e
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        println!("[THERMO-STREAMS] Module loaded for parallel replica execution");
 
-        println!(
-            "[THERMO-STREAMS] Created {} streams for parallel replica execution",
-            streams.len()
-        );
+        // Get kernel functions from module
+        let kernel_init_osc = module
+            .load_function("initialize_oscillators_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("initialize_oscillators_kernel not found: {}", e)))?;
 
-        // Get kernel functions
-        let kernel_init_osc = device
-            .get_func("thermodynamic_module", "initialize_oscillators_kernel")
-            .ok_or_else(|| {
-                PRCTError::GpuError("initialize_oscillators_kernel not found".into())
-            })?;
+        let kernel_compute_coupling = module
+            .load_function("compute_coupling_forces_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("compute_coupling_forces_kernel not found: {}", e)))?;
 
-        let kernel_compute_coupling = device
-            .get_func("thermodynamic_module", "compute_coupling_forces_kernel")
-            .ok_or_else(|| {
-                PRCTError::GpuError("compute_coupling_forces_kernel not found".into())
-            })?;
+        let kernel_evolve_osc = module
+            .load_function("evolve_oscillators_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("evolve_oscillators_kernel not found: {}", e)))?;
 
-        let kernel_evolve_osc = device
-            .get_func("thermodynamic_module", "evolve_oscillators_kernel")
-            .ok_or_else(|| PRCTError::GpuError("evolve_oscillators_kernel not found".into()))?;
+        let kernel_evolve_osc_conflicts = module
+            .load_function("evolve_oscillators_with_conflicts_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("evolve_oscillators_with_conflicts_kernel not found: {}", e)))?;
 
-        let kernel_evolve_osc_conflicts = device
-            .get_func(
-                "thermodynamic_module",
-                "evolve_oscillators_with_conflicts_kernel",
-            )
-            .ok_or_else(|| {
-                PRCTError::GpuError("evolve_oscillators_with_conflicts_kernel not found".into())
-            })?;
+        let kernel_compute_energy = module
+            .load_function("compute_energy_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("compute_energy_kernel not found: {}", e)))?;
 
-        let kernel_compute_energy = device
-            .get_func("thermodynamic_module", "compute_energy_kernel")
-            .ok_or_else(|| PRCTError::GpuError("compute_energy_kernel not found".into()))?;
-
-        let kernel_compute_conflicts = device
-            .get_func("thermodynamic_module", "compute_conflicts_kernel")
-            .ok_or_else(|| PRCTError::GpuError("compute_conflicts_kernel not found".into()))?;
+        let kernel_compute_conflicts = module
+            .load_function("compute_conflicts_kernel")
+            .map_err(|e| PRCTError::GpuError(format!("compute_conflicts_kernel not found: {}", e)))?;
 
         Ok(Self {
-            device,
-            streams,
+            context,
             num_replicas,
             kernel_init_osc,
             kernel_compute_coupling,
@@ -136,10 +97,10 @@ impl ThermodynamicContext {
         })
     }
 
-    /// Run parallel tempering step across all replicas concurrently
+    /// Run parallel tempering step across all replicas sequentially
     ///
-    /// This launches kernels on each replica's dedicated stream, achieving
-    /// TRUE parallelism on GPU. Returns immediately - all replicas running in parallel.
+    /// cudarc 0.18.1 note: Stream-per-replica parallelism not implemented.
+    /// This executes replicas sequentially on default stream.
     ///
     /// # Arguments
     /// * `replica_states` - Per-replica GPU state buffers
@@ -148,7 +109,7 @@ impl ThermodynamicContext {
     /// * `step` - Current evolution step
     ///
     /// # Returns
-    /// Ok(()) when all launches succeed (does NOT wait for completion)
+    /// Ok(()) when all launches succeed
     pub fn parallel_tempering_step_async(
         &self,
         replica_states: &[ReplicaState],
@@ -164,12 +125,10 @@ impl ThermodynamicContext {
             )));
         }
 
-        // Launch evolution kernel on each replica's stream - TRUE parallel execution
-        for (replica_id, (state, stream)) in replica_states
-            .iter()
-            .zip(self.streams.iter())
-            .enumerate()
-        {
+        let stream = self.context.default_stream();
+
+        // Launch evolution kernel sequentially
+        for (replica_id, state) in replica_states.iter().enumerate() {
             let temp = temperatures[replica_id];
             let blocks = graph_data.num_vertices.div_ceil(256);
 
@@ -179,41 +138,33 @@ impl ThermodynamicContext {
                 shared_mem_bytes: 0,
             };
 
-            // Launch on this replica's dedicated stream
-            unsafe {
-                self.kernel_evolve_osc.clone().launch_on_stream(
-                    stream,
-                    config,
-                    (
-                        &state.d_phases,
-                        &state.d_velocities,
-                        &state.d_coupling_forces,
-                        graph_data.num_vertices as i32,
-                        0.01f32, // dt
-                        temp,
-                        &state.d_force_strong,
-                        &state.d_force_weak,
-                    ),
-                ).map_err(|e| PRCTError::GpuError(format!("Kernel launch failed: {:?}", e)))?;
-            }
+            // Launch on default stream
+            stream.launch(&self.kernel_evolve_osc, config, (
+                &state.d_phases,
+                &state.d_velocities,
+                &state.d_coupling_forces,
+                graph_data.num_vertices as i32,
+                0.01f32, // dt
+                temp,
+                &state.d_force_strong,
+                &state.d_force_weak,
+            )).map_err(|e| PRCTError::GpuError(format!("Kernel launch failed: {:?}", e)))?;
         }
 
-        // Returns immediately - all replicas running in parallel on GPU
         Ok(())
     }
 
-    /// Synchronize all replica streams
+    /// Synchronize all replicas
     ///
-    /// Blocks until all pending operations on all replica streams complete
+    /// Blocks until all pending operations complete
     pub fn synchronize_all(&self) -> Result<()> {
-        // In cudarc 0.11, device.synchronize() waits for all streams
-        self.device.synchronize().map_err(|e| {
-            PRCTError::GpuError(format!("Failed to synchronize all replica streams: {}", e))
+        self.context.synchronize().map_err(|e| {
+            PRCTError::GpuError(format!("Failed to synchronize all replicas: {}", e))
         })?;
         Ok(())
     }
 
-    /// Synchronize specific replica stream
+    /// Synchronize specific replica (same as synchronize_all in this implementation)
     pub fn synchronize_replica(&self, replica_id: usize) -> Result<()> {
         if replica_id >= self.num_replicas {
             return Err(PRCTError::GpuError(format!(
@@ -223,25 +174,11 @@ impl ThermodynamicContext {
             )));
         }
 
-        // In cudarc 0.11, use device.synchronize() instead of stream-level sync
-        self.device.synchronize().map_err(|e| {
-            PRCTError::GpuError(format!("Failed to sync replica {} stream: {}", replica_id, e))
+        self.context.synchronize().map_err(|e| {
+            PRCTError::GpuError(format!("Failed to sync replica {}: {}", replica_id, e))
         })?;
 
         Ok(())
-    }
-
-    /// Get stream for specific replica
-    pub fn get_replica_stream(&self, replica_id: usize) -> Result<&CudaStream> {
-        if replica_id >= self.num_replicas {
-            return Err(PRCTError::GpuError(format!(
-                "Invalid replica ID: {} (max: {})",
-                replica_id,
-                self.num_replicas - 1
-            )));
-        }
-
-        Ok(&self.streams[replica_id])
     }
 
     /// Get number of replicas
@@ -249,9 +186,9 @@ impl ThermodynamicContext {
         self.num_replicas
     }
 
-    /// Get device reference
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    /// Get context reference
+    pub fn context(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 }
 
@@ -289,12 +226,11 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_multi_stream_context() {
-        let device = Arc::new(CudaDevice::new(0).expect("CUDA not available"));
-        let ctx = ThermodynamicContext::new(device, 8, "target/ptx/thermodynamic.ptx")
+        let context = Arc::new(CudaContext::new(0).expect("CUDA not available"));
+        let ctx = ThermodynamicContext::new(context, 8, "target/ptx/thermodynamic.ptx")
             .expect("Failed to create context");
 
         assert_eq!(ctx.num_replicas(), 8);
-        assert_eq!(ctx.streams.len(), 8);
 
         // Test synchronization
         ctx.synchronize_all().expect("Sync failed");

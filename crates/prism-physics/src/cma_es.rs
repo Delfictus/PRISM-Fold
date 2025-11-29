@@ -1,7 +1,6 @@
 //! CMA-ES optimization implementation
 
 use nalgebra::{DMatrix, DVector};
-use serde::{Deserialize, Serialize};
 
 /// CMA-ES optimizer state
 #[derive(Debug, Clone)]
@@ -30,7 +29,7 @@ impl CmaEsOptimizer {
     }
 
     /// TODO(GPU-CMA-03): GPU-accelerated covariance matrix update
-    pub fn update(&mut self, solutions: &[DVector<f32>], fitness: &[f32]) {
+    pub fn update(&mut self, _solutions: &[DVector<f32>], _fitness: &[f32]) {
         self.generation += 1;
     }
 }

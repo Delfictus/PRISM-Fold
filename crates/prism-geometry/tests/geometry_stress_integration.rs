@@ -233,13 +233,13 @@ fn test_geometry_stress_overhead() {
 #[test]
 #[ignore] // Requires CUDA GPU
 fn test_gpu_sensor_basic() {
-    use cudarc::driver::CudaDevice;
+    use cudarc::driver::CudaContext;
     use prism_geometry::GeometrySensorLayer;
     use std::sync::Arc;
 
     env_logger::try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA not available");
+    let device = CudaContext::new(0).expect("CUDA not available");
     let sensor = GeometrySensorLayer::new(device, "target/ptx/stress_analysis.ptx")
         .expect("GPU init failed");
 
@@ -261,13 +261,13 @@ fn test_gpu_sensor_basic() {
 #[test]
 #[ignore] // Requires CUDA GPU
 fn test_gpu_vs_cpu_equivalence() {
-    use cudarc::driver::CudaDevice;
+    use cudarc::driver::CudaContext;
     use prism_geometry::GeometrySensorLayer;
     use std::sync::Arc;
 
     env_logger::try_init().ok();
 
-    let device = CudaDevice::new(0).expect("CUDA not available");
+    let device = CudaContext::new(0).expect("CUDA not available");
     let gpu_sensor = GeometrySensorLayer::new(device, "target/ptx/stress_analysis.ptx")
         .expect("GPU init failed");
     let cpu_sensor = GeometrySensorCpu::new();

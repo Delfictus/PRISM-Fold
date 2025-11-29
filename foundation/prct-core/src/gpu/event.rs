@@ -45,7 +45,7 @@ pub struct EventRegistry {
     events: Arc<Mutex<HashMap<String, CudaEvent>>>,
 
     /// Parent device
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 }
 
 impl EventRegistry {
@@ -71,7 +71,7 @@ impl EventRegistry {
             .map_err(|e| PRCTError::GpuError(format!("Failed to lock event registry: {}", e)))?;
 
         let event = events.entry(name.to_string()).or_insert_with(|| {
-            CudaEvent::new(&self.device, name.to_string()).expect("Failed to create event")
+            CudaEvent::new(&self.context, name.to_string()).expect("Failed to create event")
         });
 
         event.record(stream)

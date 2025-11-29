@@ -5,18 +5,18 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use cudarc::driver::{CudaDevice, LaunchConfig, LaunchAsync};
+use cudarc::driver::{CudaContext, LaunchConfig};
 use ndarray::Array2;
 
 /// GPU k-opt optimizer for TSP
 pub struct GpuKOpt {
-    context: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
     max_k: usize,
 }
 
 impl GpuKOpt {
     pub fn new(max_k: usize) -> Result<Self> {
-        let context = CudaDevice::new(0)?;
+        let context = CudaContext::new(0)?;
 
         // Register k-opt kernels
         Self::register_kopt_kernels(&context)?;
@@ -24,7 +24,7 @@ impl GpuKOpt {
         Ok(Self { context, max_k })
     }
 
-    fn register_kopt_kernels(context: &Arc<CudaDevice>) -> Result<()> {
+    fn register_kopt_kernels(context: &Arc<CudaContext>) -> Result<()> {
         // 2-opt kernel (most important)
         let two_opt_kernel = r#"
         extern "C" __global__ void two_opt_improvements(
@@ -84,15 +84,15 @@ impl GpuKOpt {
 
         // Upload data to GPU
         let tour_i32: Vec<i32> = tour.iter().map(|&x| x as i32).collect();
-        let mut tour_gpu = self.context.htod_sync_copy(&tour_i32)?;
+        let mut tour_gpu = self.context.clone_htod(&tour_i32)?;
 
         let dist_flat: Vec<f32> = distance_matrix.iter().copied().collect();
-        let dist_gpu = self.context.htod_sync_copy(&dist_flat)?;
+        let dist_gpu = self.context.clone_htod(&dist_flat)?;
 
         let mut improvements_gpu = self.context.alloc_zeros::<i32>(1)?;
         let mut best_i_gpu = self.context.alloc_zeros::<i32>(1)?;
         let mut best_j_gpu = self.context.alloc_zeros::<i32>(1)?;
-        let mut best_delta_gpu = self.context.htod_sync_copy(&[f32::INFINITY])?;
+        let mut best_delta_gpu = self.context.clone_htod(&[f32::INFINITY])?;
 
         // Parallel 2-opt evaluation on GPU
         let mut current_tour = tour.to_vec();
@@ -102,10 +102,10 @@ impl GpuKOpt {
         while improved && iterations < 100 {
             // Upload current tour
             let tour_i32: Vec<i32> = current_tour.iter().map(|&x| x as i32).collect();
-            tour_gpu = self.context.htod_sync_copy(&tour_i32)?;
+            tour_gpu = self.context.clone_htod(&tour_i32)?;
 
             // Reset improvement tracking
-            best_delta_gpu = self.context.htod_sync_copy(&[f32::INFINITY])?;
+            best_delta_gpu = self.context.clone_htod(&[f32::INFINITY])?;
 
             // Launch kernel - evaluates ALL n² possible 2-opt moves in parallel
             let block_size = 16;

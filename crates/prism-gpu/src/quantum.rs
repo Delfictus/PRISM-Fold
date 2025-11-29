@@ -40,7 +40,8 @@
 //! REFERENCE: PRISM GPU Plan §4.3 (Phase 3 Quantum Kernel)
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaModule, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// Maximum supported graph size (enforced at runtime)
@@ -61,7 +62,7 @@ const DEFAULT_COUPLING_STRENGTH: f32 = 1.0;
 /// GPU-accelerated quantum evolution for Phase 3 coloring
 ///
 /// Maintains CUDA device context and compiled PTX module.
-/// Thread-safe via Arc<CudaDevice>.
+/// Thread-safe via Arc<CudaContext>.
 ///
 /// STAGE 3 ENHANCEMENTS:
 /// - Complex-valued quantum amplitudes (real + imaginary components)
@@ -70,7 +71,13 @@ const DEFAULT_COUPLING_STRENGTH: f32 = 1.0;
 /// - Telemetry for coherence, purity, entanglement tracking
 pub struct QuantumEvolutionGpu {
     /// CUDA device handle
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+
+    /// CUDA stream for operations
+    stream: Arc<CudaStream>,
+
+    /// Loaded PTX module
+    module: Arc<CudaModule>,
 
     /// Evolution time parameter (controls exploration)
     evolution_time: f32,
@@ -106,43 +113,46 @@ impl QuantumEvolutionGpu {
     ///
     /// # Example
     /// ```rust,no_run
-    /// use cudarc::driver::CudaDevice;
+    /// use cudarc::driver::CudaContext;
     /// use prism_gpu::quantum::QuantumEvolutionGpu;
     /// use std::sync::Arc;
     ///
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let quantum = QuantumEvolutionGpu::new(Arc::new(device), "kernels/quantum.ptx").unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         log::info!("Loading Quantum Evolution PTX module from: {}", ptx_path);
 
-        // Load PTX module
-        let ptx_str = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read PTX file: {}", ptx_path))?;
+        // Get default stream
+        let stream = context.default_stream();
 
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "quantum",
-                &[
-                    "quantum_evolve_kernel",
-                    "quantum_measure_kernel",
-                    "quantum_evolve_measure_fused_kernel",
-                    "init_amplitudes_kernel",
-                    // Complex evolution kernels (Stage 3)
-                    "quantum_evolve_complex_kernel",
-                    "init_complex_amplitudes_kernel",
-                    // Stochastic measurement kernels (Stage 3.4)
-                    "quantum_measure_stochastic_kernel",
-                    "init_rng_states_kernel",
-                ],
-            )
+        // Load PTX module
+        let module = context.load_module(Ptx::from_file(ptx_path))
             .context("Failed to load Quantum Evolution PTX module")?;
+
+        // Verify kernel functions exist
+        let required_kernels = [
+            "quantum_evolve_kernel",
+            "quantum_measure_kernel",
+            "quantum_evolve_measure_fused_kernel",
+            "init_amplitudes_kernel",
+            "quantum_evolve_complex_kernel",
+            "init_complex_amplitudes_kernel",
+            "quantum_measure_stochastic_kernel",
+            "init_rng_states_kernel",
+        ];
+
+        for kernel_name in &required_kernels {
+            module.load_function(kernel_name)
+                .with_context(|| format!("Failed to find kernel function: {}", kernel_name))?;
+        }
 
         log::info!("Quantum Evolution GPU module loaded successfully");
 
         Ok(Self {
-            device,
+            context,
+            stream,
+            module,
             evolution_time: DEFAULT_EVOLUTION_TIME,
             coupling_strength: DEFAULT_COUPLING_STRENGTH,
             purity: 1.0,             // Initially pure state
@@ -165,7 +175,7 @@ impl QuantumEvolutionGpu {
     /// - PTX loading fails
     /// - Parameters out of valid range
     pub fn new_with_params(
-        device: Arc<CudaDevice>,
+        context: Arc<CudaContext>,
         ptx_path: &str,
         evolution_time: f32,
         coupling_strength: f32,
@@ -181,7 +191,7 @@ impl QuantumEvolutionGpu {
             coupling_strength
         );
 
-        let mut quantum = Self::new(device, ptx_path)?;
+        let mut quantum = Self::new(context, ptx_path)?;
         quantum.evolution_time = evolution_time;
         quantum.coupling_strength = coupling_strength;
 
@@ -221,9 +231,9 @@ impl QuantumEvolutionGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::quantum::QuantumEvolutionGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
-    /// # let device = CudaDevice::new(0).unwrap();
+    /// # let device = CudaContext::new(0).unwrap();
     /// # let quantum = QuantumEvolutionGpu::new(Arc::new(device), "target/ptx/quantum.ptx").unwrap();
     /// let adjacency = vec![
     ///     vec![1, 2],  // vertex 0 -> neighbors 1, 2
@@ -275,20 +285,20 @@ impl QuantumEvolutionGpu {
         // Step 3: Allocate and initialize GPU memory
         log::debug!("Allocating GPU memory");
 
-        let d_adjacency: CudaSlice<i32> = self
-            .device
-            .htod_sync_copy(&adjacency_matrix)
+        let d_adjacency = self
+            .stream
+            .clone_htod(&adjacency_matrix)
             .context("Failed to copy adjacency matrix to GPU")?;
 
-        let d_couplings: CudaSlice<f32> = self
-            .device
-            .htod_sync_copy(&couplings)
+        let d_couplings = self
+            .stream
+            .clone_htod(&couplings)
             .context("Failed to copy couplings to GPU")?;
 
         // Initialize amplitudes in equal superposition
         let amplitude_size = num_vertices * max_colors;
-        let mut d_amplitudes: CudaSlice<f32> = self
-            .device
+        let mut d_amplitudes = self
+            .stream
             .alloc_zeros(amplitude_size)
             .context("Failed to allocate amplitudes on GPU")?;
 
@@ -311,8 +321,8 @@ impl QuantumEvolutionGpu {
         // Step 6: Copy results back to host
         log::debug!("Copying results back to host");
         let colors_i32 = self
-            .device
-            .dtoh_sync_copy(&d_colors)
+            .stream
+            .clone_dtoh(&d_colors)
             .context("Failed to copy colors from GPU")?;
 
         // Convert i32 to usize
@@ -349,9 +359,7 @@ impl QuantumEvolutionGpu {
         num_vertices: usize,
         max_colors: usize,
     ) -> Result<()> {
-        let init_func = self
-            .device
-            .get_func("quantum", "init_amplitudes_kernel")
+        let init_func = self.module.load_function("init_amplitudes_kernel")
             .context("Failed to get init_amplitudes_kernel function")?;
 
         let total_size = num_vertices * max_colors;
@@ -363,10 +371,15 @@ impl QuantumEvolutionGpu {
             shared_mem_bytes: 0,
         };
 
-        unsafe { init_func.launch(cfg, (amplitudes, num_vertices as i32, max_colors as i32)) }
-            .context("Failed to launch init_amplitudes_kernel")?;
+        unsafe {
+            self.stream.launch_builder(&init_func)
+                .arg(amplitudes)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("Amplitude initialization synchronization failed")?;
 
@@ -430,9 +443,7 @@ impl QuantumEvolutionGpu {
         );
 
         // Launch GPU kernel for stochastic initialization with random perturbations
-        let init_func = self
-            .device
-            .get_func("quantum", "init_complex_amplitudes_kernel")
+        let init_func = self.module.load_function("init_complex_amplitudes_kernel")
             .context("Failed to get init_complex_amplitudes_kernel function")?;
 
         // Use dynamic seed for stochastic amplitude initialization
@@ -451,19 +462,16 @@ impl QuantumEvolutionGpu {
         };
 
         unsafe {
-            init_func.launch(
-                cfg,
-                (
-                    real_amplitudes,
-                    imag_amplitudes,
-                    num_vertices as i32,
-                    max_colors as i32,
-                    dynamic_seed,
-                ),
-            )?;
-        }
+            self.stream.launch_builder(&init_func)
+                .arg(real_amplitudes)
+                .arg(imag_amplitudes)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .arg(&dynamic_seed)
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("Complex amplitude initialization synchronization failed")?;
 
@@ -540,15 +548,13 @@ impl QuantumEvolutionGpu {
         );
 
         // Allocate GPU buffer for RNG states
-        let mut rng_states: CudaSlice<u8> = self
-            .device
+        let mut rng_states = self
+            .stream
             .alloc_zeros(total_bytes)
             .context("Failed to allocate RNG states on GPU")?;
 
         // Initialize RNG states with init_rng_states_kernel
-        let init_rng_func = self
-            .device
-            .get_func("quantum", "init_rng_states_kernel")
+        let init_rng_func = self.module.load_function("init_rng_states_kernel")
             .context("Failed to get init_rng_states_kernel function")?;
 
         let grid_dim = (num_vertices as u32).div_ceil(BLOCK_SIZE as u32);
@@ -559,10 +565,14 @@ impl QuantumEvolutionGpu {
         };
 
         unsafe {
-            init_rng_func.launch(cfg, (&mut rng_states, seed, num_vertices as i32))?;
-        }
+            self.stream.launch_builder(&init_rng_func)
+                .arg(&mut rng_states)
+                .arg(&seed)
+                .arg(&(num_vertices as i32))
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("RNG state initialization synchronization failed")?;
 
@@ -683,9 +693,7 @@ impl QuantumEvolutionGpu {
             };
 
             // Launch quantum_evolve_complex_kernel
-            let evolve_func = self
-                .device
-                .get_func("quantum", "quantum_evolve_complex_kernel")
+            let evolve_func = self.module.load_function("quantum_evolve_complex_kernel")
                 .context("Failed to get quantum_evolve_complex_kernel function")?;
 
             let grid_dim = (num_vertices as u32).div_ceil(BLOCK_SIZE as u32);
@@ -696,21 +704,18 @@ impl QuantumEvolutionGpu {
             };
 
             unsafe {
-                evolve_func.launch(
-                    cfg,
-                    (
-                        adjacency,
-                        real_amplitudes as &mut CudaSlice<f32>,
-                        imag_amplitudes as &mut CudaSlice<f32>,
-                        couplings,
-                        config.evolution_time,
-                        transverse_field,
-                        config.interference_decay,
-                        num_vertices as i32,
-                        max_colors as i32,
-                    ),
-                )?;
-            }
+                self.stream.launch_builder(&evolve_func)
+                    .arg(adjacency as &CudaSlice<i32>)
+                    .arg(real_amplitudes as &CudaSlice<f32>)
+                    .arg(imag_amplitudes as &CudaSlice<f32>)
+                    .arg(couplings as &CudaSlice<f32>)
+                    .arg(&config.evolution_time)
+                    .arg(&transverse_field)
+                    .arg(&config.interference_decay)
+                    .arg(&(num_vertices as i32))
+                    .arg(&(max_colors as i32))
+                    .launch(cfg)?
+            };
 
             // Log progress every 10 iterations
             if iter % 10 == 0 || iter == config.evolution_iterations - 1 {
@@ -810,15 +815,13 @@ impl QuantumEvolutionGpu {
         log::debug!("Launching stochastic measurement kernel");
 
         // Allocate output buffer
-        let d_colors: CudaSlice<i32> = self
-            .device
+        let d_colors = self
+            .stream
             .alloc_zeros(num_vertices)
             .context("Failed to allocate colors buffer")?;
 
         // Get kernel function
-        let measure_func = self
-            .device
-            .get_func("quantum", "quantum_measure_stochastic_kernel")
+        let measure_func = self.module.load_function("quantum_measure_stochastic_kernel")
             .context("Failed to get quantum_measure_stochastic_kernel function")?;
 
         // Launch configuration: 1 thread per vertex
@@ -829,27 +832,16 @@ impl QuantumEvolutionGpu {
             shared_mem_bytes: 0,
         };
 
-        // Launch kernel: quantum_measure_stochastic_kernel(
-        //     const float* real_amplitudes,
-        //     const float* imag_amplitudes,
-        //     int* colors,
-        //     curandStatePhilox4_32_10_t* rng_states,
-        //     int num_vertices,
-        //     int max_colors
-        // )
         unsafe {
-            measure_func.launch(
-                cfg,
-                (
-                    real_amplitudes,
-                    imag_amplitudes,
-                    &d_colors,
-                    rng_states,
-                    num_vertices as i32,
-                    max_colors as i32,
-                ),
-            )?;
-        }
+            self.stream.launch_builder(&measure_func)
+                .arg(real_amplitudes)
+                .arg(imag_amplitudes)
+                .arg(&d_colors)
+                .arg(rng_states)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .launch(cfg)?
+        };
 
         log::debug!(
             "Stochastic measurement kernel launched: {} vertices, grid_dim={}",
@@ -897,12 +889,12 @@ impl QuantumEvolutionGpu {
     ) -> Result<f32> {
         // Copy to host for now (production will use GPU reduction)
         let real_host = self
-            .device
-            .dtoh_sync_copy(real_amps)
+            .stream
+            .clone_dtoh(real_amps)
             .context("Failed to copy real amplitudes")?;
         let imag_host = self
-            .device
-            .dtoh_sync_copy(imag_amps)
+            .stream
+            .clone_dtoh(imag_amps)
             .context("Failed to copy imaginary amplitudes")?;
 
         let n = real_host.len() as f32;
@@ -943,8 +935,8 @@ impl QuantumEvolutionGpu {
         real_amps: &CudaSlice<f32>,
         imag_amps: &CudaSlice<f32>,
     ) -> Result<f32> {
-        let real_host = self.device.dtoh_sync_copy(real_amps)?;
-        let imag_host = self.device.dtoh_sync_copy(imag_amps)?;
+        let real_host = self.stream.clone_dtoh(real_amps)?;
+        let imag_host = self.stream.clone_dtoh(imag_amps)?;
 
         let cross_term: f32 = real_host
             .iter()
@@ -1047,9 +1039,7 @@ impl QuantumEvolutionGpu {
         num_vertices: usize,
         max_colors: usize,
     ) -> Result<()> {
-        let evolve_func = self
-            .device
-            .get_func("quantum", "quantum_evolve_kernel")
+        let evolve_func = self.module.load_function("quantum_evolve_kernel")
             .context("Failed to get quantum_evolve_kernel function")?;
 
         let grid_dim = (num_vertices as u32).div_ceil(BLOCK_SIZE as u32);
@@ -1061,21 +1051,17 @@ impl QuantumEvolutionGpu {
         };
 
         unsafe {
-            evolve_func.launch(
-                cfg,
-                (
-                    adjacency,
-                    amplitudes,
-                    couplings,
-                    self.evolution_time,
-                    num_vertices as i32,
-                    max_colors as i32,
-                ),
-            )
-        }
-        .context("Failed to launch quantum_evolve_kernel")?;
+            self.stream.launch_builder(&evolve_func)
+                .arg(adjacency)
+                .arg(amplitudes)
+                .arg(couplings)
+                .arg(&self.evolution_time)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("Evolution kernel synchronization failed")?;
 
@@ -1090,14 +1076,12 @@ impl QuantumEvolutionGpu {
         num_vertices: usize,
         max_colors: usize,
     ) -> Result<CudaSlice<i32>> {
-        let measure_func = self
-            .device
-            .get_func("quantum", "quantum_measure_kernel")
+        let measure_func = self.module.load_function("quantum_measure_kernel")
             .context("Failed to get quantum_measure_kernel function")?;
 
         // Allocate output buffer
-        let mut d_colors: CudaSlice<i32> = self
-            .device
+        let d_colors = self
+            .stream
             .alloc_zeros(num_vertices)
             .context("Failed to allocate colors buffer on GPU")?;
 
@@ -1116,20 +1100,16 @@ impl QuantumEvolutionGpu {
             .unwrap_or(12345);
 
         unsafe {
-            measure_func.launch(
-                cfg,
-                (
-                    amplitudes,
-                    &mut d_colors,
-                    dynamic_seed,
-                    num_vertices as i32,
-                    max_colors as i32,
-                ),
-            )
-        }
-        .context("Failed to launch quantum_measure_kernel")?;
+            self.stream.launch_builder(&measure_func)
+                .arg(amplitudes)
+                .arg(&d_colors)
+                .arg(&dynamic_seed)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("Measurement kernel synchronization failed")?;
 
@@ -1138,8 +1118,8 @@ impl QuantumEvolutionGpu {
     }
 
     /// Returns reference to underlying CUDA device
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Returns current evolution time parameter
@@ -1187,7 +1167,7 @@ mod tests {
     fn test_quantum_evolution_small_graph() {
         env_logger::builder().is_test(true).try_init().ok();
 
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let quantum = QuantumEvolutionGpu::new(Arc::new(device), "target/ptx/quantum.ptx")
             .expect("Failed to create QuantumEvolutionGpu");
 
@@ -1211,7 +1191,7 @@ mod tests {
 
     #[test]
     fn test_validation_max_vertices() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let quantum = QuantumEvolutionGpu::new(Arc::new(device), "target/ptx/quantum.ptx")
             .expect("Failed to create QuantumEvolutionGpu");
 
@@ -1224,7 +1204,7 @@ mod tests {
 
     #[test]
     fn test_validation_max_colors() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
         let quantum = QuantumEvolutionGpu::new(Arc::new(device), "target/ptx/quantum.ptx")
             .expect("Failed to create QuantumEvolutionGpu");
 
@@ -1237,7 +1217,7 @@ mod tests {
 
     #[test]
     fn test_parameter_validation() {
-        let device = CudaDevice::new(0).expect("CUDA device not available");
+        let device = CudaContext::new(0).expect("CUDA device not available");
 
         // Valid parameters
         let result = QuantumEvolutionGpu::new_with_params(
@@ -1298,10 +1278,10 @@ impl QuantumEvolutionGpu {
     /// # Example
     /// ```rust,no_run
     /// # use prism_gpu::QuantumEvolutionGpu;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use prism_core::Phase3Config;
     /// # use std::sync::Arc;
-    /// let device = CudaDevice::new(0).unwrap();
+    /// let device = CudaContext::new(0).unwrap();
     /// let mut quantum = QuantumEvolutionGpu::new(Arc::new(device), "target/ptx/quantum.ptx").unwrap();
     /// let adjacency = vec![vec![1, 2], vec![0, 2], vec![0, 1]];
     /// let config = Phase3Config {
@@ -1349,26 +1329,26 @@ impl QuantumEvolutionGpu {
 
         // 2. Convert adjacency list to dense matrix
         let adjacency_matrix = self.adjacency_to_matrix(adjacency, num_vertices);
-        let d_adjacency: CudaSlice<i32> = self
-            .device
-            .htod_sync_copy(&adjacency_matrix)
+        let d_adjacency = self
+            .stream
+            .clone_htod(&adjacency_matrix)
             .context("Failed to copy adjacency matrix to GPU")?;
 
         // 3. Prepare coupling strengths (uniform for all vertices)
         let couplings = vec![config.coupling_strength; num_vertices];
-        let d_couplings: CudaSlice<f32> = self
-            .device
-            .htod_sync_copy(&couplings)
+        let d_couplings = self
+            .stream
+            .clone_htod(&couplings)
             .context("Failed to copy couplings to GPU")?;
 
         // 4. Initialize complex amplitude buffers
         let amplitude_size = num_vertices * config.max_colors;
-        let mut d_real_amplitudes: CudaSlice<f32> = self
-            .device
+        let mut d_real_amplitudes = self
+            .stream
             .alloc_zeros(amplitude_size)
             .context("Failed to allocate real amplitudes")?;
-        let mut d_imag_amplitudes: CudaSlice<f32> = self
-            .device
+        let mut d_imag_amplitudes = self
+            .stream
             .alloc_zeros(amplitude_size)
             .context("Failed to allocate imaginary amplitudes")?;
 
@@ -1436,8 +1416,8 @@ impl QuantumEvolutionGpu {
         // 7. Copy results back to host
         log::debug!("Copying results back to host");
         let colors_i32 = self
-            .device
-            .dtoh_sync_copy(&d_colors)
+            .stream
+            .clone_dtoh(&d_colors)
             .context("Failed to copy colors from GPU")?;
 
         // 8. Convert i32 to usize
@@ -1483,14 +1463,12 @@ impl QuantumEvolutionGpu {
 
         log::debug!("Launching deterministic measurement (legacy kernel approximation)");
 
-        let measure_func = self
-            .device
-            .get_func("quantum", "quantum_measure_kernel")
+        let measure_func = self.module.load_function("quantum_measure_kernel")
             .context("Failed to get quantum_measure_kernel function")?;
 
         // Allocate output buffer
-        let mut d_colors: CudaSlice<i32> = self
-            .device
+        let d_colors = self
+            .stream
             .alloc_zeros(num_vertices)
             .context("Failed to allocate colors buffer on GPU")?;
 
@@ -1511,20 +1489,16 @@ impl QuantumEvolutionGpu {
         // Launch with real amplitudes (legacy path)
         // TODO(Stage 7): Replace with complex-aware kernel
         unsafe {
-            measure_func.launch(
-                cfg,
-                (
-                    real_amplitudes,
-                    &mut d_colors,
-                    dynamic_seed,
-                    num_vertices as i32,
-                    max_colors as i32,
-                ),
-            )
-        }
-        .context("Failed to launch quantum_measure_kernel")?;
+            self.stream.launch_builder(&measure_func)
+                .arg(real_amplitudes)
+                .arg(&d_colors)
+                .arg(&dynamic_seed)
+                .arg(&(num_vertices as i32))
+                .arg(&(max_colors as i32))
+                .launch(cfg)?
+        };
 
-        self.device
+        self.stream
             .synchronize()
             .context("Measurement kernel synchronization failed")?;
 

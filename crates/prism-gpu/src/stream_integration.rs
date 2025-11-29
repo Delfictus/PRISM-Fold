@@ -13,7 +13,7 @@
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │                   ManagedGpuContext                         │
 //! ├─────────────────────────────────────────────────────────────┤
-//! │  device: Arc<CudaDevice>                                    │
+//! │  context: Arc<CudaContext>                                    │
 //! │  stream_pool: Option<StreamPool>          ← Stream manager  │
 //! │  pipeline_coordinator: Option<...>        ← Triple-buffer   │
 //! └─────────────────────────────────────────────────────────────┘
@@ -29,10 +29,10 @@
 //! ## Synchronous Mode (Default)
 //! ```no_run
 //! use prism_gpu::stream_integration::ManagedGpuContext;
-//! use cudarc::driver::CudaDevice;
+//! use cudarc::driver::CudaContext;
 //! use std::sync::Arc;
 //!
-//! let device = CudaDevice::new(0).unwrap();
+//! let device = CudaContext::new(0).unwrap();
 //! let ctx = ManagedGpuContext::new(device, false).unwrap();
 //! // Uses standard synchronous execution
 //! ```
@@ -40,10 +40,10 @@
 //! ## Asynchronous Mode (Triple-buffered)
 //! ```no_run
 //! # use prism_gpu::stream_integration::ManagedGpuContext;
-//! # use cudarc::driver::CudaDevice;
+//! # use cudarc::driver::CudaContext;
 //! # use prism_core::RuntimeConfig;
 //! # use std::sync::Arc;
-//! let device = CudaDevice::new(0).unwrap();
+//! let device = CudaContext::new(0).unwrap();
 //! let mut ctx = ManagedGpuContext::new(device, true).unwrap();
 //!
 //! // Triple-buffered iteration (overlaps 3 stages)
@@ -58,7 +58,7 @@
 
 use crate::stream_manager::{AsyncPipelineCoordinator, StreamPool, StreamPurpose};
 use anyhow::Result;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use prism_core::{KernelTelemetry, RuntimeConfig};
 use std::sync::Arc;
 
@@ -70,17 +70,17 @@ use std::sync::Arc;
 ///
 /// # Thread Safety
 ///
-/// ManagedGpuContext is Send + Sync via Arc<CudaDevice>.
+/// ManagedGpuContext is Send + Sync via Arc<CudaContext>.
 /// Stream pool and coordinator are only accessed through &mut methods.
 ///
 /// # Example
 ///
 /// ```no_run
 /// # use prism_gpu::stream_integration::ManagedGpuContext;
-/// # use cudarc::driver::CudaDevice;
+/// # use cudarc::driver::CudaContext;
 /// # use prism_core::RuntimeConfig;
 /// # use std::sync::Arc;
-/// let device = CudaDevice::new(0).unwrap();
+/// let device = CudaContext::new(0).unwrap();
 /// let mut ctx = ManagedGpuContext::new(device, true).unwrap();
 ///
 /// let config = RuntimeConfig::default();
@@ -88,7 +88,7 @@ use std::sync::Arc;
 /// ```
 pub struct ManagedGpuContext {
     /// CUDA device handle
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
     /// Stream pool (None if stream management disabled)
     stream_pool: Option<StreamPool>,
@@ -117,21 +117,21 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use std::sync::Arc;
     /// // Synchronous mode
     /// let ctx = ManagedGpuContext::new(
-    ///     CudaDevice::new(0).unwrap(),
+    ///     CudaContext::new(0).unwrap(),
     ///     false
     /// ).unwrap();
     ///
     /// // Asynchronous mode
     /// let ctx_async = ManagedGpuContext::new(
-    ///     CudaDevice::new(0).unwrap(),
+    ///     CudaContext::new(0).unwrap(),
     ///     true
     /// ).unwrap();
     /// ```
-    pub fn new(device: Arc<CudaDevice>, enable_streams: bool) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>, enable_streams: bool) -> Result<Self> {
         let (stream_pool, pipeline_coordinator) = if enable_streams {
             log::info!("Initializing ManagedGpuContext with stream management enabled");
             (
@@ -144,7 +144,7 @@ impl ManagedGpuContext {
         };
 
         Ok(Self {
-            device,
+            context: device,
             stream_pool,
             pipeline_coordinator,
         })
@@ -159,13 +159,13 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), false).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), false).unwrap();
     /// let device = ctx.device();
     /// // Use device for kernel launches, memory ops, etc.
     /// ```
-    pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+    pub fn device(&self) -> &Arc<CudaContext> {
+        &self.context
     }
 
     /// Get stream index for specific purpose
@@ -185,8 +185,8 @@ impl ManagedGpuContext {
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
     /// # use prism_gpu::stream_manager::StreamPurpose;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let mut ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let mut ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// if let Some(stream_idx) = ctx.get_stream(StreamPurpose::KernelExecution) {
     ///     // Use stream_idx for async kernel launch
     /// }
@@ -228,9 +228,9 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
+    /// # use cudarc::driver::CudaContext;
     /// # use prism_core::RuntimeConfig;
-    /// # let mut ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # let mut ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// for iter in 0..100 {
     ///     let config = RuntimeConfig::default();
     ///     let telemetry = ctx.triple_buffered_step(config)?;
@@ -280,7 +280,7 @@ impl ManagedGpuContext {
         // 2. Launch kernel
         // 3. Synchronize device
         // 4. Download telemetry
-        self.device.synchronize()?;
+        self.context.synchronize()?;
 
         Ok(KernelTelemetry::default())
     }
@@ -295,8 +295,8 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// if ctx.has_stream_management() {
     ///     // Use async execution paths
     /// } else {
@@ -315,8 +315,8 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// if let Some(pool) = ctx.stream_pool() {
     ///     // Access stream pool...
     /// }
@@ -358,8 +358,8 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// ctx.synchronize()?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
@@ -367,7 +367,7 @@ impl ManagedGpuContext {
         if let Some(ref coordinator) = self.pipeline_coordinator {
             coordinator.synchronize()
         } else {
-            self.device.synchronize().map_err(Into::into)
+            self.context.synchronize().map_err(Into::into)
         }
     }
 
@@ -380,8 +380,8 @@ impl ManagedGpuContext {
     ///
     /// ```no_run
     /// # use prism_gpu::stream_integration::ManagedGpuContext;
-    /// # use cudarc::driver::CudaDevice;
-    /// # let mut ctx = ManagedGpuContext::new(CudaDevice::new(0).unwrap(), true).unwrap();
+    /// # use cudarc::driver::CudaContext;
+    /// # let mut ctx = ManagedGpuContext::new(CudaContext::new(0).unwrap(), true).unwrap();
     /// ctx.reset_pipeline();
     /// ```
     pub fn reset_pipeline(&mut self) {
@@ -391,7 +391,7 @@ impl ManagedGpuContext {
     }
 }
 
-// Thread safety: Arc<CudaDevice> is Send + Sync, stream pool/coordinator are !Sync
+// Thread safety: Arc<CudaContext> is Send + Sync, stream pool/coordinator are !Sync
 // but ManagedGpuContext only exposes them via &mut, so we can safely implement Send
 unsafe impl Send for ManagedGpuContext {}
 
@@ -403,7 +403,7 @@ mod tests {
     fn test_managed_context_sync_mode() {
         // Test that sync mode doesn't require GPU
         // (will fail if we try to create device, but struct creation should work)
-        if let Ok(device) = CudaDevice::new(0) {
+        if let Ok(device) = CudaContext::new(0) {
             let ctx = ManagedGpuContext::new(device, false).unwrap();
             assert!(!ctx.has_stream_management());
             assert!(ctx.stream_pool().is_none());
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_managed_context_async_mode() {
-        if let Ok(device) = CudaDevice::new(0) {
+        if let Ok(device) = CudaContext::new(0) {
             let ctx = ManagedGpuContext::new(device, true).unwrap();
             assert!(ctx.has_stream_management());
             assert!(ctx.stream_pool().is_some());
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_triple_buffered_step() {
-        if let Ok(device) = CudaDevice::new(0) {
+        if let Ok(device) = CudaContext::new(0) {
             let mut ctx = ManagedGpuContext::new(device, true).unwrap();
 
             let config = RuntimeConfig::default();
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_sync_fallback() {
-        if let Ok(device) = CudaDevice::new(0) {
+        if let Ok(device) = CudaContext::new(0) {
             let mut ctx = ManagedGpuContext::new(device, false).unwrap();
 
             let config = RuntimeConfig::default();

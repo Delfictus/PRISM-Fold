@@ -22,8 +22,8 @@ dashmap = "6.0"
 # CPU optimization (always available)
 rayon = "1.10"
 
-# GPU acceleration - aligned with parent workspace cudarc 0.11
-cudarc = { version = "0.11", features = ["std", "cuda-12050"], optional = true }
+# GPU acceleration - aligned with parent workspace cudarc 0.18.1
+cudarc = { workspace = true, optional = true }
 
 [lib]
 name = "neuromorphic_engine"

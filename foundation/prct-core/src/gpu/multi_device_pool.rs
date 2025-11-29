@@ -8,7 +8,7 @@
 //! - Zero stubs: Full implementation, no todo!/unimplemented!
 
 use crate::errors::*;
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::sync::Arc;
 
 /// Multi-GPU device pool for distributed computation
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// work distribution across GPUs for thermodynamic, quantum, and memetic phases.
 pub struct MultiGpuDevicePool {
     /// CUDA devices (one per GPU)
-    devices: Vec<Arc<CudaDevice>>,
+    devices: Vec<Arc<CudaContext>>,
 
     /// Peer-to-peer access enabled between GPUs
     peer_access_enabled: bool,
@@ -49,7 +49,7 @@ impl MultiGpuDevicePool {
         for &device_id in device_ids {
             println!("[MULTI-GPU][INIT] Initializing GPU {}", device_id);
 
-            let device = CudaDevice::new(device_id).map_err(|e| {
+            let device = CudaContext::new(device_id).map_err(|e| {
                 PRCTError::GpuError(format!(
                     "Failed to initialize CUDA device {}: {}",
                     device_id, e

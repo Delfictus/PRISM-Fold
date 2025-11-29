@@ -9,7 +9,7 @@ use num_complex::Complex64;
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, LaunchAsync, LaunchConfig};
 
 #[cfg(feature = "cuda")]
 const QUANTUM_KERNELS: &str = r#"
@@ -143,7 +143,7 @@ extern "C" __global__ void complex_normalize(
 
 #[cfg(feature = "cuda")]
 pub struct GpuQuantumSolver {
-    device: Arc<CudaDevice>,
+    device: Arc<CudaContext>,
     matvec_fn: Arc<CudaFunction>,
     axpy_fn: Arc<CudaFunction>,
     norm_sq_fn: Arc<CudaFunction>,
@@ -153,7 +153,7 @@ pub struct GpuQuantumSolver {
 #[cfg(feature = "cuda")]
 impl GpuQuantumSolver {
     /// Create new GPU quantum solver
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>) -> Result<Self> {
         // Compile CUDA kernels
         let ptx = cudarc::nvrtc::compile_ptx(QUANTUM_KERNELS)
             .map_err(|e| PRCTError::GpuError(format!("NVRTC compilation failed: {:?}", e)))?;
@@ -218,6 +218,7 @@ impl GpuQuantumSolver {
         dt: f64,
         num_steps: usize,
     ) -> Result<Vec<Complex64>> {
+        let stream = context.default_stream();
         let n = hamiltonian.nrows();
 
         if initial_state.len() != n {

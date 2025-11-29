@@ -9,7 +9,7 @@
 //! GPU acceleration via CUDA kernels with CPU fallback for simulation mode.
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaFunction, CudaSlice, LaunchConfig, PushKernelArg};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -78,7 +78,7 @@ impl BoundingBox {
 ///
 /// REFERENCE: Metaphysical Telemetry Coupling - Geometry Sensor Layer
 pub struct GeometrySensorLayer {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 
     // CUDA kernels
     kernel_overlap: CudaFunction,
@@ -99,7 +99,7 @@ impl GeometrySensorLayer {
     /// Initialize geometry sensor layer from PTX module
     ///
     /// # Arguments
-    /// * `device` - CUDA device handle
+    /// * `context` - CUDA context handle
     /// * `ptx_path` - Path to stress_analysis.ptx module
     ///
     /// # Errors
@@ -107,45 +107,40 @@ impl GeometrySensorLayer {
     ///
     /// # Safety
     /// Caller must ensure PTX module is valid and compiled for compatible architecture.
-    pub fn new(device: Arc<CudaDevice>, ptx_path: &str) -> Result<Self> {
+    pub fn new(context: Arc<CudaContext>, ptx_path: &str) -> Result<Self> {
         info!("Loading Geometry Sensor PTX module from: {}", ptx_path);
 
-        let ptx_str = std::fs::read_to_string(ptx_path)
+        let ptx_data = std::fs::read(ptx_path)
             .with_context(|| format!("Failed to read PTX from {}", ptx_path))?;
 
-        device
-            .load_ptx(
-                ptx_str.into(),
-                "stress_analysis",
-                &[
-                    "compute_overlap_density",
-                    "compute_bounding_box",
-                    "detect_anchor_hotspots",
-                    "compute_curvature_stress",
-                ],
-            )
+        let ptx = cudarc::nvrtc::Ptx::from_src(std::str::from_utf8(&ptx_data)?);
+
+        // cudarc 0.18.1 API: load_module returns CudaModule
+        let module = context
+            .load_module(ptx)
             .context("Failed to load PTX module")?;
 
-        let kernel_overlap = device
-            .get_func("stress_analysis", "compute_overlap_density")
-            .ok_or_else(|| anyhow::anyhow!("Kernel not found: compute_overlap_density"))?;
+        // Load individual kernel functions from module
+        let kernel_overlap = module
+            .load_function("compute_overlap_density")
+            .context("Failed to load kernel: compute_overlap_density")?;
 
-        let kernel_bbox = device
-            .get_func("stress_analysis", "compute_bounding_box")
-            .ok_or_else(|| anyhow::anyhow!("Kernel not found: compute_bounding_box"))?;
+        let kernel_bbox = module
+            .load_function("compute_bounding_box")
+            .context("Failed to load kernel: compute_bounding_box")?;
 
-        let kernel_hotspots = device
-            .get_func("stress_analysis", "detect_anchor_hotspots")
-            .ok_or_else(|| anyhow::anyhow!("Kernel not found: detect_anchor_hotspots"))?;
+        let kernel_hotspots = module
+            .load_function("detect_anchor_hotspots")
+            .context("Failed to load kernel: detect_anchor_hotspots")?;
 
-        let kernel_curvature = device
-            .get_func("stress_analysis", "compute_curvature_stress")
-            .ok_or_else(|| anyhow::anyhow!("Kernel not found: compute_curvature_stress"))?;
+        let kernel_curvature = module
+            .load_function("compute_curvature_stress")
+            .context("Failed to load kernel: compute_curvature_stress")?;
 
         info!("Geometry Sensor GPU module loaded successfully");
 
         Ok(Self {
-            device,
+            context,
             kernel_overlap,
             kernel_bbox,
             kernel_hotspots,
@@ -207,10 +202,10 @@ impl GeometrySensorLayer {
         anchors: &[usize],
         start: Instant,
     ) -> Result<GeometryMetrics> {
-        // Upload positions to GPU
-        let d_positions = self
-            .device
-            .htod_sync_copy(positions)
+        // Get stream and upload positions to GPU
+        let stream = self.context.default_stream();
+        let d_positions = stream
+            .clone_htod(positions)
             .context("Failed to copy positions to GPU")?;
 
         // 1. Compute bounding box
@@ -248,8 +243,9 @@ impl GeometrySensorLayer {
         d_positions: &CudaSlice<f32>,
         num_vertices: usize,
     ) -> Result<BoundingBox> {
+        let stream = self.context.default_stream();
         let bbox_host = vec![0.0f32; 4];
-        let d_bbox = self.device.htod_sync_copy(&bbox_host)?;
+        let d_bbox = stream.clone_htod(&bbox_host)?;
 
         let config = LaunchConfig {
             grid_dim: (1, 1, 1), // Single block for reduction
@@ -258,15 +254,16 @@ impl GeometrySensorLayer {
         };
 
         unsafe {
-            self.kernel_bbox
-                .clone()
-                .launch(config, (d_positions, &d_bbox, num_vertices as u32))?;
+            stream.launch_builder(&self.kernel_bbox)
+                .arg(d_positions)
+                .arg(&d_bbox)
+                .arg(&(num_vertices as u32))
+                .launch(config)?;
         }
 
-        self.device.synchronize()?;
+        stream.synchronize()?;
 
-        let mut bbox_result = vec![0.0f32; 4];
-        self.device.dtoh_sync_copy_into(&d_bbox, &mut bbox_result)?;
+        let bbox_result = stream.clone_dtoh(&d_bbox)?;
 
         Ok(BoundingBox::new(
             bbox_result[0],
@@ -282,8 +279,9 @@ impl GeometrySensorLayer {
         d_positions: &CudaSlice<f32>,
         num_vertices: usize,
     ) -> Result<(f64, f64)> {
+        let stream = self.context.default_stream();
         let overlap_host = vec![0.0f32; num_vertices];
-        let d_overlap = self.device.htod_sync_copy(&overlap_host)?;
+        let d_overlap = stream.clone_htod(&overlap_host)?;
 
         let block_size = 256;
         let grid_size = num_vertices.div_ceil(block_size) as u32;
@@ -295,16 +293,16 @@ impl GeometrySensorLayer {
         };
 
         unsafe {
-            self.kernel_overlap
-                .clone()
-                .launch(config, (d_positions, &d_overlap, num_vertices as u32))?;
+            stream.launch_builder(&self.kernel_overlap)
+                .arg(d_positions)
+                .arg(&d_overlap)
+                .arg(&(num_vertices as u32))
+                .launch(config)?;
         }
 
-        self.device.synchronize()?;
+        stream.synchronize()?;
 
-        let mut overlap_result = vec![0.0f32; num_vertices];
-        self.device
-            .dtoh_sync_copy_into(&d_overlap, &mut overlap_result)?;
+        let overlap_result = stream.clone_dtoh(&d_overlap)?;
 
         let mean = overlap_result.iter().map(|&x| x as f64).sum::<f64>() / num_vertices as f64;
         let max = overlap_result
@@ -326,11 +324,12 @@ impl GeometrySensorLayer {
         // Convert adjacency to CSR format
         let (row_ptr, col_idx) = self.adjacency_to_csr(adjacency, num_vertices);
 
-        let d_row_ptr = self.device.htod_sync_copy(&row_ptr)?;
-        let d_col_idx = self.device.htod_sync_copy(&col_idx)?;
+        let stream = self.context.default_stream();
+        let d_row_ptr = stream.clone_htod(&row_ptr)?;
+        let d_col_idx = stream.clone_htod(&col_idx)?;
 
         let curvature_host = vec![0.0f32; num_vertices];
-        let d_curvature = self.device.htod_sync_copy(&curvature_host)?;
+        let d_curvature = stream.clone_htod(&curvature_host)?;
 
         let block_size = 256;
         let grid_size = num_vertices.div_ceil(block_size) as u32;
@@ -342,23 +341,18 @@ impl GeometrySensorLayer {
         };
 
         unsafe {
-            self.kernel_curvature.clone().launch(
-                config,
-                (
-                    d_positions,
-                    &d_row_ptr,
-                    &d_col_idx,
-                    &d_curvature,
-                    num_vertices as u32,
-                ),
-            )?;
+            stream.launch_builder(&self.kernel_curvature)
+                .arg(d_positions)
+                .arg(&d_row_ptr)
+                .arg(&d_col_idx)
+                .arg(&d_curvature)
+                .arg(&(num_vertices as u32))
+                .launch(config)?;
         }
 
-        self.device.synchronize()?;
+        stream.synchronize()?;
 
-        let mut curvature_result = vec![0.0f32; num_vertices];
-        self.device
-            .dtoh_sync_copy_into(&d_curvature, &mut curvature_result)?;
+        let curvature_result = stream.clone_dtoh(&d_curvature)?;
 
         let mean = curvature_result.iter().map(|&x| x as f64).sum::<f64>() / num_vertices as f64;
         let max = curvature_result
@@ -381,11 +375,12 @@ impl GeometrySensorLayer {
             return Ok((0, 0.0));
         }
 
+        let stream = self.context.default_stream();
         let anchors_u32: Vec<u32> = anchors.iter().map(|&a| a as u32).collect();
-        let d_anchors = self.device.htod_sync_copy(&anchors_u32)?;
+        let d_anchors = stream.clone_htod(&anchors_u32)?;
 
         let hotspot_host = vec![0.0f32; num_vertices];
-        let d_hotspot = self.device.htod_sync_copy(&hotspot_host)?;
+        let d_hotspot = stream.clone_htod(&hotspot_host)?;
 
         let block_size = 256;
         let grid_size = num_vertices.div_ceil(block_size) as u32;
@@ -397,23 +392,18 @@ impl GeometrySensorLayer {
         };
 
         unsafe {
-            self.kernel_hotspots.clone().launch(
-                config,
-                (
-                    d_positions,
-                    &d_anchors,
-                    &d_hotspot,
-                    num_vertices as u32,
-                    anchors.len() as u32,
-                ),
-            )?;
+            stream.launch_builder(&self.kernel_hotspots)
+                .arg(d_positions)
+                .arg(&d_anchors)
+                .arg(&d_hotspot)
+                .arg(&(num_vertices as u32))
+                .arg(&(anchors.len() as u32))
+                .launch(config)?;
         }
 
-        self.device.synchronize()?;
+        stream.synchronize()?;
 
-        let mut hotspot_result = vec![0.0f32; num_vertices];
-        self.device
-            .dtoh_sync_copy_into(&d_hotspot, &mut hotspot_result)?;
+        let hotspot_result = stream.clone_dtoh(&d_hotspot)?;
 
         let num_hotspots = hotspot_result
             .iter()

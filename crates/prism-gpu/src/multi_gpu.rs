@@ -7,7 +7,7 @@
 //! - Supports round-robin, least-loaded, and memory-aware scheduling
 //! - Tracks per-device metrics (utilization, memory, kernel count)
 //! - Integrates with GpuContext for device initialization
-//! - Thread-safe via Arc<CudaDevice> and interior mutability
+//! - Thread-safe via Arc<CudaContext> and interior mutability
 //!
 //! SCHEDULING POLICIES:
 //! 1. RoundRobin: Simple cyclic assignment (no metric tracking)
@@ -26,7 +26,7 @@
 //! - No blocking I/O during scheduling
 
 use anyhow::{Context, Result};
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -125,8 +125,8 @@ pub enum SchedulingPolicy {
 /// # Ok::<(), anyhow::Error>(())
 /// ```
 pub struct MultiGpuManager {
-    /// CUDA device handles (device_id -> Arc<CudaDevice>)
-    devices: HashMap<usize, Arc<CudaDevice>>,
+    /// CUDA device handles (device_id -> Arc<CudaContext>)
+    devices: HashMap<usize, Arc<CudaContext>>,
 
     /// Device ordinals (ordered for iteration)
     device_ids: Vec<usize>,
@@ -176,8 +176,8 @@ impl MultiGpuManager {
         let mut load_tracker = HashMap::new();
 
         for &device_id in &device_ids {
-            // Initialize CUDA device (cudarc returns Arc<CudaDevice>)
-            let device = CudaDevice::new(device_id)
+            // Initialize CUDA device (cudarc returns Arc<CudaContext>)
+            let device = CudaContext::new(device_id)
                 .with_context(|| format!("Failed to initialize CUDA device {}", device_id))?;
 
             // Placeholder total memory (cudarc doesn't expose this easily)
@@ -330,7 +330,7 @@ impl MultiGpuManager {
     ///
     /// # Panics
     /// Panics if device_id was not registered during initialization.
-    pub fn get_device(&self, device_id: usize) -> &Arc<CudaDevice> {
+    pub fn get_device(&self, device_id: usize) -> &Arc<CudaContext> {
         self.devices
             .get(&device_id)
             .unwrap_or_else(|| panic!("Device {} not registered in MultiGpuManager", device_id))

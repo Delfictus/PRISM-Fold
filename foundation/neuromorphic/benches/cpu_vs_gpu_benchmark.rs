@@ -8,7 +8,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use neuromorphic_engine::{reservoir::ReservoirConfig, ReservoirComputer};
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 #[cfg(feature = "cuda")]
 use neuromorphic_engine::gpu_reservoir::GpuReservoirComputer;
 
@@ -36,7 +36,7 @@ fn bench_cpu_reservoir_init(c: &mut Criterion) {
 /// Benchmark: GPU Reservoir Initialization
 #[cfg(feature = "cuda")]
 fn bench_gpu_reservoir_init(c: &mut Criterion) {
-    if let Ok(device) = CudaDevice::new(0) {
+    if let Ok(device) = CudaContext::new(0) {
         let mut group = c.benchmark_group("reservoir_initialization");
 
         for size in [100, 500, 1000, 2000].iter() {
@@ -71,7 +71,7 @@ fn bench_gpu_reservoir_init(c: &mut Criterion) {
 /// Benchmark: GPU Memory Throughput
 #[cfg(feature = "cuda")]
 fn bench_gpu_memory_throughput(c: &mut Criterion) {
-    if let Ok(device) = CudaDevice::new(0) {
+    if let Ok(device) = CudaContext::new(0) {
         let mut group = c.benchmark_group("memory_throughput");
 
         for size_mb in [1, 10, 100].iter() {
@@ -81,7 +81,7 @@ fn bench_gpu_memory_throughput(c: &mut Criterion) {
                 let data: Vec<f32> = vec![1.0; num_elements];
 
                 b.iter(|| {
-                    let _ = black_box(device.htod_sync_copy(&data));
+                    let _ = black_box(stream.clone_htod(&data));
                 });
             });
         }

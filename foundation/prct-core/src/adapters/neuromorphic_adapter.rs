@@ -9,7 +9,7 @@ use shared_types::*;
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
+use cudarc::driver::CudaContext;
 #[cfg(feature = "cuda")]
 use neuromorphic_engine::gpu_reservoir::GpuReservoirComputer;
 #[cfg(feature = "cuda")]
@@ -36,7 +36,7 @@ pub struct NeuromorphicAdapter {
 impl NeuromorphicAdapter {
     /// Create new neuromorphic adapter with GPU acceleration
     #[cfg(feature = "cuda")]
-    pub fn new(cuda_device: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new(cuda_device: Arc<CudaContext>) -> Result<Self> {
         // Configure reservoir for PRCT (optimized for pattern detection)
         let reservoir_config = ReservoirConfig {
             size: 1000,               // 1000 neurons for rich dynamics

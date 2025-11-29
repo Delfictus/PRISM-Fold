@@ -16,7 +16,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct GpuReservoirComputer {
     config: ReservoirConfig,
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
 
     // Custom GEMV kernels for matrix-vector operations
     gemv_input_kernel: Option<Arc<CudaFunction>>,
@@ -76,7 +77,7 @@ impl GpuReservoirComputer {
     #[deprecated(since = "0.2.0", note = "Use new_shared() with shared CUDA context")]
     pub fn new(config: ReservoirConfig, gpu_config: GpuConfig) -> Result<Self> {
         // Create own context (not recommended - violates Article V)
-        let device = CudaDevice::new(gpu_config.device_id as usize).map_err(|e| {
+        let context = CudaContext::new(gpu_config.device_id as usize).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to initialize CUDA context {}: {}",
                 gpu_config.device_id,
@@ -84,8 +85,8 @@ impl GpuReservoirComputer {
             )
         })?;
 
-        // CudaDevice::new() returns Arc<CudaDevice>, so pass directly
-        Self::new_shared(config, device)
+        // CudaDevice::new() returns Arc<CudaContext>, so pass directly
+        Self::new_shared(config, context)
     }
 
     /// Create new GPU-accelerated reservoir computer with shared CUDA context
@@ -95,7 +96,7 @@ impl GpuReservoirComputer {
     /// # Arguments
     /// * `config` - Reservoir configuration
     /// * `context` - Shared CUDA context (prevents initialization overhead)
-    pub fn new_shared(config: ReservoirConfig, context: Arc<CudaDevice>) -> Result<Self> {
+    pub fn new_shared(config: ReservoirConfig, context: Arc<CudaContext>) -> Result<Self> {
         // Validate configuration parameters
         if config.size == 0 {
             return Err(anyhow::anyhow!("Reservoir size must be greater than 0"));
@@ -109,11 +110,11 @@ impl GpuReservoirComputer {
 
         println!("[GPU-RESERVOIR] Using shared CUDA context (Article V compliance)");
 
-        // cudarc 0.9: use device directly (no separate cuBLAS)
-        let device = context;
+        // Create default stream (cudarc 0.18.1 - wrapped in Arc)
+        let stream = Arc::new(context.default_stream());
 
         // Load custom GEMV kernels for better performance
-        let (gemv_input_kernel, gemv_reservoir_kernel) = Self::load_gemv_kernels(&device)?;
+        let (gemv_input_kernel, gemv_reservoir_kernel) = Self::load_gemv_kernels(&context)?;
 
         // Calculate matrix sizes for GPU memory allocation with overflow checking
         let reservoir_matrix_size = config.size.checked_mul(config.size).ok_or_else(|| {
@@ -144,8 +145,8 @@ impl GpuReservoirComputer {
             return Err(anyhow::anyhow!("GPU memory requirement ({:.1}MB) exceeds RTX 5070 capacity. Reduce reservoir size.", total_memory_mb));
         }
 
-        // Allocate persistent GPU memory buffers with comprehensive error handling (cudarc 0.9 API)
-        let gpu_weights_input = device.alloc_zeros::<f32>(input_matrix_size).map_err(|e| {
+        // Allocate persistent GPU memory buffers with comprehensive error handling (cudarc 0.18.1 API - use stream)
+        let gpu_weights_input = stream.alloc_zeros::<f32>(input_matrix_size).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to allocate input weights GPU memory ({}MB): {}",
                 (input_matrix_size * 4) as f64 / (1024.0 * 1024.0),
@@ -153,7 +154,7 @@ impl GpuReservoirComputer {
             )
         })?;
         let gpu_weights_reservoir =
-            device
+            stream
                 .alloc_zeros::<f32>(reservoir_matrix_size)
                 .map_err(|e| {
                     anyhow::anyhow!(
@@ -162,16 +163,16 @@ impl GpuReservoirComputer {
                         e
                     )
                 })?;
-        let gpu_state_current = device
+        let gpu_state_current = stream
             .alloc_zeros::<f32>(state_vector_size)
             .map_err(|e| anyhow::anyhow!("Failed to allocate current state GPU memory: {}", e))?;
-        let gpu_state_previous = device
+        let gpu_state_previous = stream
             .alloc_zeros::<f32>(state_vector_size)
             .map_err(|e| anyhow::anyhow!("Failed to allocate previous state GPU memory: {}", e))?;
-        let gpu_input_buffer = device
+        let gpu_input_buffer = stream
             .alloc_zeros::<f32>(input_vector_size)
             .map_err(|e| anyhow::anyhow!("Failed to allocate input buffer GPU memory: {}", e))?;
-        let gpu_temp_buffer = device.alloc_zeros::<f32>(state_vector_size).map_err(|e| {
+        let gpu_temp_buffer = stream.alloc_zeros::<f32>(state_vector_size).map_err(|e| {
             anyhow::anyhow!("Failed to allocate temporary buffer GPU memory: {}", e)
         })?;
 
@@ -180,12 +181,13 @@ impl GpuReservoirComputer {
 
         // Initialize CUDA kernel manager for optimized operations
         let kernel_manager =
-            crate::cuda_kernels::NeuromorphicKernelManager::new(device.clone()).ok(); // Use Option to handle cases where kernel compilation fails
+            crate::cuda_kernels::NeuromorphicKernelManager::new(context.clone()).ok(); // Use Option to handle cases where kernel compilation fails
 
-        // Initialize GPU matrices with random weights (cudarc 0.9: no cublas field)
+        // Initialize GPU matrices with random weights
         let mut gpu_reservoir = Self {
             config,
-            device,
+            context,
+            stream,
             gemv_input_kernel,
             gemv_reservoir_kernel,
             gpu_weights_input,
@@ -208,7 +210,7 @@ impl GpuReservoirComputer {
     /// Load custom GEMV kernels from PTX
     #[allow(clippy::type_complexity)]
     fn load_gemv_kernels(
-        context: &Arc<CudaDevice>,
+        context: &Arc<CudaContext>,
     ) -> Result<(Option<Arc<CudaFunction>>, Option<Arc<CudaFunction>>)> {
         let ptx_path = "target/ptx/neuromorphic_gemv.ptx";
 
@@ -217,26 +219,22 @@ impl GpuReservoirComputer {
             return Ok((None, None));
         }
 
-        // Load PTX with cudarc 0.9 API
+        // Load PTX with cudarc 0.18.1 API (load_module takes only ptx)
         let ptx = cudarc::nvrtc::Ptx::from_file(ptx_path);
-        context
-            .load_ptx(
-                ptx,
-                "neuromorphic_gemv",
-                &["matvec_input_kernel", "matvec_reservoir_kernel"],
-            )
+        let module = context
+            .load_module(ptx)
             .map_err(|e| anyhow::anyhow!("Failed to load neuromorphic GEMV PTX: {}", e))?;
 
         let input_kernel = Arc::new(
-            context
-                .get_func("neuromorphic_gemv", "matvec_input_kernel")
-                .ok_or_else(|| anyhow::anyhow!("Failed to load matvec_input_kernel"))?,
+            module
+                .load_function("matvec_input_kernel")
+                .map_err(|e| anyhow::anyhow!("Failed to load matvec_input_kernel: {}", e))?,
         );
 
         let reservoir_kernel = Arc::new(
-            context
-                .get_func("neuromorphic_gemv", "matvec_reservoir_kernel")
-                .ok_or_else(|| anyhow::anyhow!("Failed to load matvec_reservoir_kernel"))?,
+            module
+                .load_function("matvec_reservoir_kernel")
+                .map_err(|e| anyhow::anyhow!("Failed to load matvec_reservoir_kernel: {}", e))?,
         );
 
         println!("[GPU-RESERVOIR] Custom GEMV kernels loaded successfully");
@@ -254,13 +252,14 @@ impl GpuReservoirComputer {
         let input_weights_f32: Vec<f32> = input_weights.iter().map(|&x| x as f32).collect();
         let reservoir_weights_f32: Vec<f32> = reservoir_weights.iter().map(|&x| x as f32).collect();
 
-        // Upload to GPU memory (cudarc 0.9 API)
+        // Upload to GPU memory (cudarc 0.18.1 API - use stream)
         println!("[GPU-RESERVOIR] Uploading weight matrices to GPU...");
         let upload_start = std::time::Instant::now();
-        self.gpu_weights_input = self.device.htod_sync_copy(&input_weights_f32)?;
-        self.gpu_weights_reservoir = self.device.htod_sync_copy(&reservoir_weights_f32)?;
+        self.gpu_weights_input = self.stream.clone_htod(&input_weights_f32)?;
+        self.gpu_weights_reservoir = self.stream.clone_htod(&reservoir_weights_f32)?;
 
-        // cudarc 0.9: sync operations are already synchronous
+        // Synchronize stream to ensure upload completes
+        self.stream.synchronize()?;
         println!(
             "[GPU-RESERVOIR] Weight upload took {:?}",
             upload_start.elapsed()
@@ -399,12 +398,12 @@ impl GpuReservoirComputer {
             ));
         }
 
-        // Copy input to GPU with error handling (cudarc 0.9 API)
+        // Copy input to GPU with error handling (cudarc 0.18.1 API - use stream)
         let upload_start = std::time::Instant::now();
         let input_f32: Vec<f32> = input_vector.iter().map(|&x| x as f32).collect();
         self.gpu_input_buffer = self
-            .device
-            .htod_sync_copy(&input_f32)
+            .stream
+            .clone_htod(&input_f32)
             .map_err(|e| anyhow::anyhow!("Failed to copy input to GPU: {}", e))?;
         println!(
             "[GPU-RESERVOIR] Upload to GPU took {:?}",
@@ -443,8 +442,8 @@ impl GpuReservoirComputer {
 
             // Kernel signature: (matrix, vector, output, alpha, beta, M, N)
             unsafe {
-                use cudarc::driver::LaunchAsync;
-                (**kernel).clone().launch(
+                self.stream.launch(
+                    &kernel,
                     cfg,
                     (
                         &self.gpu_weights_input,   // const float* matrix [M x N]
@@ -457,7 +456,7 @@ impl GpuReservoirComputer {
                     ),
                 )?;
             }
-            self.device.synchronize()?;
+            self.stream.synchronize()?;
         } else {
             return Err(anyhow::anyhow!(
                 "Custom GEMV kernels required for cudarc 0.9. Please ensure PTX file exists at target/ptx/neuromorphic_gemv.ptx"
@@ -490,8 +489,8 @@ impl GpuReservoirComputer {
 
             // Kernel signature: (matrix, vector, output, alpha, beta, M)
             unsafe {
-                use cudarc::driver::LaunchAsync;
-                (**kernel).clone().launch(
+                self.stream.launch(
+                    &kernel,
                     cfg,
                     (
                         &self.gpu_weights_reservoir, // const float* matrix [M x M]
@@ -503,7 +502,7 @@ impl GpuReservoirComputer {
                     ),
                 )?;
             }
-            self.device.synchronize()?;
+            self.stream.synchronize()?;
         } else {
             return Err(anyhow::anyhow!(
                 "Custom GEMV kernels required for cudarc 0.9. Please ensure PTX file exists at target/ptx/neuromorphic_gemv.ptx"
@@ -523,9 +522,9 @@ impl GpuReservoirComputer {
             kernel_start.elapsed()
         );
 
-        // Copy result back to CPU for interface compatibility (cudarc 0.9 API)
+        // Copy result back to CPU for interface compatibility (cudarc 0.18.1 API - use stream)
         let download_start = std::time::Instant::now();
-        self.cpu_state = self.device.dtoh_sync_copy(&self.gpu_state_current)?;
+        self.cpu_state = self.stream.clone_dtoh(&self.gpu_state_current)?;
         println!(
             "[GPU-RESERVOIR] Download state took {:?}",
             download_start.elapsed()
@@ -581,12 +580,12 @@ impl GpuReservoirComputer {
             return Ok(());
         }
 
-        // Fallback: Copy temp buffer to current state (cudarc 0.9 API)
+        // Fallback: Copy temp buffer to current state (cudarc 0.18.1 API - use stream)
         // Note: This is simplified and missing tanh application
         // The custom CUDA kernel is critical for full neuromorphic dynamics
 
-        self.device
-            .dtod_copy(&self.gpu_temp_buffer, &mut self.gpu_state_current)
+        self.stream
+            .memcpy_dtod(&self.gpu_temp_buffer, &mut self.gpu_state_current)
             .map_err(|e| anyhow::anyhow!("Failed to copy temp buffer: {}", e))?;
 
         // For production use, the kernel manager must be available
@@ -679,9 +678,9 @@ impl GpuReservoirComputer {
 
     /// Reset reservoir state
     pub fn reset_gpu(&mut self) -> Result<()> {
-        // Clear GPU memory buffers (cudarc 0.9 API)
-        self.device.memset_zeros(&mut self.gpu_state_current)?;
-        self.device.memset_zeros(&mut self.gpu_state_previous)?;
+        // Clear GPU memory buffers (cudarc 0.18.1 API - use stream)
+        self.stream.memset_zeros(&mut self.gpu_state_current)?;
+        self.stream.memset_zeros(&mut self.gpu_state_previous)?;
 
         // Clear CPU state
         self.cpu_state.fill(0.0);

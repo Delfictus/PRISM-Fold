@@ -10,7 +10,7 @@
 //! - Fallback to single default stream for cudarc 0.9 limitations
 
 use crate::errors::*;
-use cudarc::driver::{CudaDevice, CudaStream};
+use cudarc::driver::{CudaContext, CudaStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ pub struct CudaStreamPool {
     next_index: AtomicUsize,
 
     /// Parent device for validation
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
 }
 
 impl CudaStreamPool {
@@ -114,7 +114,7 @@ impl CudaStreamPool {
     /// Blocks until all pending operations complete
     /// cudarc 0.11: Uses device-level synchronization (syncs all streams)
     pub fn synchronize_all(&self) -> Result<()> {
-        self.device.synchronize().map_err(|e| {
+        self.context.synchronize().map_err(|e| {
             PRCTError::GpuError(format!("Failed to synchronize device: {:?}", e))
         })?;
         Ok(())
@@ -132,7 +132,7 @@ impl CudaStreamPool {
             )));
         }
 
-        self.device.synchronize().map_err(|e| {
+        self.context.synchronize().map_err(|e| {
             PRCTError::GpuError(format!("Failed to synchronize device (stream {}): {:?}", index, e))
         })?;
 
@@ -141,7 +141,7 @@ impl CudaStreamPool {
 
     /// Get parent device
     pub fn device(&self) -> &Arc<CudaDevice> {
-        &self.device
+        &self.context
     }
 }
 
@@ -161,20 +161,20 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_stream_pool_creation() {
-        let device = CudaDevice::new(0).expect("Failed to create device");
-        let device = Arc::new(device);
+        let context = CudaContext::new(0).expect("Failed to create device");
+        let context = Arc::new(context);
 
-        let pool = CudaStreamPool::new(&device, 4).expect("Failed to create pool");
+        let pool = CudaStreamPool::new(&context,4).expect("Failed to create pool");
         assert_eq!(pool.count(), 4);
     }
 
     #[test]
     #[cfg(feature = "cuda")]
     fn test_round_robin_allocation() {
-        let device = CudaDevice::new(0).expect("Failed to create device");
-        let device = Arc::new(device);
+        let context = CudaContext::new(0).expect("Failed to create device");
+        let context = Arc::new(context);
 
-        let pool = CudaStreamPool::new(&device, 3).expect("Failed to create pool");
+        let pool = CudaStreamPool::new(&context,3).expect("Failed to create pool");
 
         // Get streams multiple times, should wrap
         for _ in 0..10 {
@@ -189,10 +189,10 @@ mod tests {
     #[test]
     #[cfg(feature = "cuda")]
     fn test_fixed_allocation() {
-        let device = CudaDevice::new(0).expect("Failed to create device");
-        let device = Arc::new(device);
+        let context = CudaContext::new(0).expect("Failed to create device");
+        let context = Arc::new(context);
 
-        let pool = CudaStreamPool::new(&device, 4).expect("Failed to create pool");
+        let pool = CudaStreamPool::new(&context,4).expect("Failed to create pool");
 
         // Fixed indices should always return same stream
         let s0_ptr = pool.get_fixed(0) as *const CudaStream;

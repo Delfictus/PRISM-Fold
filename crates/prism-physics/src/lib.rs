@@ -4,10 +4,9 @@
 //! Provides Phase X (CMA-ES) and materials physics computations.
 
 use prism_core::{
-    CmaState, ColoringSolution, Graph, PhaseContext, PhaseController, PhaseOutcome, PhaseTelemetry,
+    ColoringSolution, Graph, PhaseContext, PhaseController, PhaseOutcome, PhaseTelemetry,
     PrismError,
 };
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -99,7 +98,8 @@ impl CmaEsPhaseController {
         Ok(())
     }
 
-    /// Compute fitness for a graph coloring solution
+    /// Compute fitness for a graph coloring solution (reserved for direct fitness eval)
+    #[allow(dead_code)]
     fn compute_fitness(&self, solution: &[f32], graph: &Graph) -> f32 {
         // Convert continuous parameters to discrete colors
         let mut coloring = ColoringSolution::new(graph.num_vertices);
@@ -124,7 +124,8 @@ impl CmaEsPhaseController {
         conflicts as f32 * 1000.0 + chromatic as f32
     }
 
-    /// Apply transfer entropy minimization (simulated for now)
+    /// Apply transfer entropy minimization (reserved for TE integration)
+    #[allow(dead_code)]
     fn minimize_transfer_entropy(&self, solution: &[f32]) -> f32 {
         // Compute transfer entropy between solution components
         // This is a simplified version - real implementation would use
@@ -137,7 +138,8 @@ impl CmaEsPhaseController {
         te_sum / solution.len() as f32
     }
 
-    /// Update CMA-ES optimizer with new solutions and fitness values
+    /// Update CMA-ES optimizer with new solutions and fitness values (reserved for batch updates)
+    #[allow(dead_code)]
     fn update_optimizer(
         &mut self,
         solutions: Vec<Vec<f32>>,
@@ -191,18 +193,6 @@ pub struct CmaEsTelemetry {
 }
 
 impl CmaEsTelemetry {
-    fn new() -> Self {
-        Self {
-            best_fitness: f32::INFINITY,
-            mean_fitness: f32::INFINITY,
-            fitness_std: 0.0,
-            sigma: 0.5,
-            generation: 0,
-            condition_number: 1.0,
-            convergence_metric: 0.0,
-        }
-    }
-
     fn from_controller(controller: &CmaEsPhaseController) -> Self {
         Self {
             best_fitness: controller.best_fitness,

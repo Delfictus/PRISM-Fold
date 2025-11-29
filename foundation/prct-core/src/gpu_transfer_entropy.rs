@@ -4,7 +4,7 @@
 //! Phase 1 of the PRISM world-record pipeline.
 //!
 //! Constitutional Compliance:
-//! - Article V: Uses shared CUDA context (Arc<CudaDevice>)
+//! - Article V: Uses shared CUDA context (Arc<CudaContext>)
 //! - Article VII: All kernels compiled in build.rs
 //! - Zero stubs: Full implementation, no todo!/unimplemented!
 
@@ -36,7 +36,7 @@ use std::sync::Arc;
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
 pub fn compute_transfer_entropy_ordering_gpu(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     stream: &CudaStream, // Stream for async execution (cudarc 0.9: synchronous, prepared for future)
     graph: &Graph,
     kuramoto_state: &KuramotoState,
@@ -208,12 +208,13 @@ fn generate_vertex_time_series_gpu(
 ///
 /// Computes TE(i→j) for all vertex pairs (i,j) using parallel GPU kernels
 fn compute_te_matrix_gpu(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     time_series: &[Vec<f64>],
     n: usize,
     time_steps: usize,
     histogram_bins: usize,
 ) -> Result<Vec<f64>> {
+    let stream = context.default_stream();
     // Configuration parameters
     let n_bins = histogram_bins as i32; // Histogram bins from config
     const EMBEDDING_DIM: i32 = 2; // Embedding dimension
@@ -521,12 +522,13 @@ fn compute_te_matrix_gpu(
 ///
 /// Expected speedup: 10-100x vs sequential version for n >= 100
 fn compute_te_matrix_batched_gpu(
-    cuda_device: &Arc<CudaDevice>,
+    cuda_device: &Arc<CudaContext>,
     time_series: &[Vec<f64>],
     n: usize,
     time_steps: usize,
     histogram_bins: usize,
 ) -> Result<Vec<f64>> {
+    let stream = context.default_stream();
     // CRITICAL: Clamp bins to match kernel's hardcoded shared memory allocation
     // Kernel allocates: 8^3=512 (3D), 8^2=64 (2D), 8 (1D) bins in shared memory
     // Using more than 8 bins causes buffer overflow and CUDA_ERROR_ILLEGAL_ADDRESS

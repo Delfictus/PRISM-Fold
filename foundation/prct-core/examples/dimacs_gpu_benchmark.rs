@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(feature = "cuda")]
     {
-        match cudarc::driver::CudaDevice::new(0) {
+        match cudarc::driver::CudaContext::new(0) {
             Ok(device) => {
                 println!("   ✅ GPU detected");
 
@@ -263,7 +263,7 @@ fn run_prct_pipeline(
         let qa_start = Instant::now();
 
         #[cfg(feature = "cuda")]
-        let device = cudarc::driver::CudaDevice::new(0).ok();
+        let device = cudarc::driver::CudaContext::new(0).ok();
         #[cfg(not(feature = "cuda"))]
         let device: Option<std::sync::Arc<()>> = None;
 

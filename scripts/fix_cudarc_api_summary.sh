@@ -1,0 +1,22 @@
+#!/bin/bash
+# Summary of cudarc API migration status
+
+echo "==============================================="
+echo " cudarc 0.18.1 API Migration Summary"
+echo "==============================================="
+echo ""
+echo "✅ FIXED (2 files):"
+echo "  1. crates/prism-gpu/src/whcr.rs"
+echo "  2. crates/prism-gpu/src/dendritic_whcr.rs"
+echo ""
+echo "⚠️  REQUIRES MANUAL FIXES (29 files)"
+echo ""
+echo "See: CUDARC_0_18_1_API_FIX_REPORT.md for full details"
+echo ""
+echo "Quick Reference:"
+echo "  OLD: context.load_ptx(ptx, \"mod\", &[\"kern\"])?;"
+echo "  NEW: let module = context.load_module(Ptx::Image(&ptx_bytes))?;"
+echo ""
+echo "  OLD: context.get_func(\"mod\", \"kern\")?;"
+echo "  NEW: module.load_function(\"kern\")?;"
+echo ""

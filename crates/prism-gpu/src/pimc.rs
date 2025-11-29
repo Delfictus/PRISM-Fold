@@ -20,7 +20,8 @@
 //! REFERENCE: PRISM Spec Section 3.3 "Quantum Annealing via PIMC"
 
 use anyhow::{Context, Result};
-use cudarc::driver::{CudaDevice, CudaSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaContext, CudaModule, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
+use cudarc::nvrtc::Ptx;
 use std::sync::Arc;
 
 /// PIMC parameters for GPU kernel
@@ -61,7 +62,9 @@ impl Default for PimcParams {
 
 /// Path Integral Monte Carlo GPU accelerator
 pub struct PimcGpu {
-    device: Arc<CudaDevice>,
+    context: Arc<CudaContext>,
+    stream: Arc<CudaStream>,
+    module: Arc<CudaModule>,
 
     // Device memory allocations
     replicas: CudaSlice<f32>,
@@ -94,7 +97,7 @@ impl PimcGpu {
     /// - Dimensions exceed MAX_DIMENSIONS (1024)
     /// - Replicas exceed MAX_REPLICAS (512)
     /// - GPU memory allocation fails
-    pub fn new(device: Arc<CudaDevice>, num_replicas: usize, dimensions: usize) -> Result<Self> {
+    pub fn new(device: Arc<CudaContext>, num_replicas: usize, dimensions: usize) -> Result<Self> {
         // Validation
         anyhow::ensure!(
             dimensions <= 1024,
@@ -113,56 +116,45 @@ impl PimcGpu {
             dimensions
         );
 
-        // Load PTX module with explicit kernel list from file system
-        let ptx_path = std::path::Path::new("target/ptx/pimc.ptx");
-        let ptx = std::fs::read_to_string(ptx_path)
-            .with_context(|| format!("Failed to read PIMC PTX file: {:?}", ptx_path))?;
-        device
-            .load_ptx(
-                ptx.into(),
-                "pimc",
-                &[
-                    "pimc_evolution_kernel",
-                    "replica_exchange_kernel",
-                    "update_annealing_schedule",
-                    "compute_ensemble_statistics",
-                    "pimc_performance_metrics",
-                    "initialize_random_spins",
-                ],
-            )
-            .context("Failed to load PIMC PTX module")?;
+        // Load PTX module
+        let ptx_path = std::path::Path::new("kernels/ptx/pimc.ptx");
+        let module = device.load_module(Ptx::from_file(ptx_path))
+            .with_context(|| format!("Failed to load PIMC PTX module: {:?}", ptx_path))?;
 
-        log::debug!("PIMC PTX module loaded with 6 kernels");
+        log::debug!("PIMC PTX module loaded");
+
+        // Get stream for memory operations
+        let stream = device.default_stream();
 
         // Allocate device memory
         let replicas_size = num_replicas * dimensions;
         let coupling_size = dimensions * dimensions;
 
-        let replicas = device
+        let replicas = stream
             .alloc_zeros::<f32>(replicas_size)
             .context("Failed to allocate replicas memory")?;
 
-        let coupling_matrix = device
+        let coupling_matrix = stream
             .alloc_zeros::<f32>(coupling_size)
             .context("Failed to allocate coupling matrix")?;
 
-        let energies = device
+        let energies = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate energies")?;
 
-        let magnetizations = device
+        let magnetizations = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate magnetizations")?;
 
-        let acceptance_rates = device
+        let acceptance_rates = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate acceptance rates")?;
 
-        let temperatures = device
+        let temperatures = stream
             .alloc_zeros::<f32>(num_replicas)
             .context("Failed to allocate temperatures")?;
 
-        let exchange_counts = device
+        let exchange_counts = stream
             .alloc_zeros::<i32>(num_replicas * num_replicas)
             .context("Failed to allocate exchange counts")?;
 
@@ -173,7 +165,9 @@ impl PimcGpu {
         };
 
         Ok(Self {
-            device,
+            context: device,
+            stream,
+            module,
             replicas,
             coupling_matrix,
             energies,
@@ -203,25 +197,19 @@ impl PimcGpu {
         };
 
         // Get kernel function
-        let kernel = self
-            .device
-            .get_func("pimc", "initialize_random_spins")
-            .context("Failed to get initialization kernel")?;
+        let kernel = self.module.load_function("initialize_random_spins")
+            .context("Failed to load initialization kernel")?;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.replicas,
-                    self.params.num_replicas,
-                    self.params.dimensions,
-                    seed,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&self.replicas)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.dimensions)
+                .arg(&seed)
+                .launch(config)?;
         }
-        .context("Failed to launch initialization kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
@@ -232,8 +220,7 @@ impl PimcGpu {
             "Coupling matrix size mismatch"
         );
 
-        self.device
-            .htod_sync_copy_into(&coupling, &mut self.coupling_matrix)
+        self.coupling_matrix = self.stream.clone_htod(coupling)
             .context("Failed to upload coupling matrix")?;
 
         Ok(())
@@ -255,33 +242,27 @@ impl PimcGpu {
         };
 
         // Get evolution kernel
-        let kernel = self
-            .device
-            .get_func("pimc", "pimc_evolution_kernel")
-            .context("Failed to get evolution kernel")?;
+        let kernel = self.module.load_function("pimc_evolution_kernel")
+            .context("Failed to load evolution kernel")?;
 
         // Launch kernel
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.replicas,
-                    &self.coupling_matrix,
-                    &self.energies,
-                    &self.magnetizations,
-                    &self.acceptance_rates,
-                    self.params.num_replicas,
-                    self.params.dimensions,
-                    self.params.beta,
-                    self.params.transverse_field,
-                    self.params.mc_steps,
-                    self.params.seed,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&self.replicas)
+                .arg(&self.coupling_matrix)
+                .arg(&self.energies)
+                .arg(&self.magnetizations)
+                .arg(&self.acceptance_rates)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.dimensions)
+                .arg(&self.params.beta)
+                .arg(&self.params.transverse_field)
+                .arg(&self.params.mc_steps)
+                .arg(&self.params.seed)
+                .launch(config)?;
         }
-        .context("Failed to launch evolution kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
@@ -301,27 +282,21 @@ impl PimcGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("pimc", "replica_exchange_kernel")
-            .context("Failed to get exchange kernel")?;
+        let kernel = self.module.load_function("replica_exchange_kernel")
+            .context("Failed to load exchange kernel")?;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.replicas,
-                    &self.temperatures,
-                    &self.energies,
-                    &self.exchange_counts,
-                    self.params.num_replicas,
-                    self.params.seed,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&self.replicas)
+                .arg(&self.temperatures)
+                .arg(&self.energies)
+                .arg(&self.exchange_counts)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.seed)
+                .launch(config)?;
         }
-        .context("Failed to launch exchange kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
@@ -346,45 +321,37 @@ impl PimcGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("pimc", "update_annealing_schedule")
-            .context("Failed to get schedule kernel")?;
+        let kernel = self.module.load_function("update_annealing_schedule")
+            .context("Failed to load schedule kernel")?;
 
         // Create transverse fields array
-        let transverse_fields = self
-            .device
+        let transverse_fields = self.stream
             .alloc_zeros::<f32>(self.params.num_replicas as usize)?;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &transverse_fields,
-                    &self.temperatures,
-                    progress,
-                    1.0f32, // total_time
-                    self.params.num_replicas,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&transverse_fields)
+                .arg(&self.temperatures)
+                .arg(&progress)
+                .arg(&1.0f32) // total_time
+                .arg(&self.params.num_replicas)
+                .launch(config)?;
         }
-        .context("Failed to launch schedule kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
         Ok(())
     }
 
     /// Computes ensemble statistics for CMA-ES integration
     pub fn compute_ensemble_statistics(&self) -> Result<EnsembleStatistics> {
         // Allocate output buffers
-        let mean_state = self
-            .device
+        let mean_state = self.stream
             .alloc_zeros::<f32>(self.params.dimensions as usize)?;
 
         let covariance_size = (self.params.dimensions * self.params.dimensions) as usize;
-        let covariance = self.device.alloc_zeros::<f32>(covariance_size)?;
+        let covariance = self.stream.alloc_zeros::<f32>(covariance_size)?;
 
-        let entropy = self.device.alloc_zeros::<f32>(1)?;
+        let entropy = self.stream.alloc_zeros::<f32>(1)?;
 
         // Launch statistics kernel
         let threads_per_block = 256;
@@ -396,34 +363,28 @@ impl PimcGpu {
             shared_mem_bytes: threads_per_block * 4,
         };
 
-        let kernel = self
-            .device
-            .get_func("pimc", "compute_ensemble_statistics")
-            .context("Failed to get statistics kernel")?;
+        let kernel = self.module.load_function("compute_ensemble_statistics")
+            .context("Failed to load statistics kernel")?;
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.replicas,
-                    &self.energies,
-                    &mean_state,
-                    &covariance,
-                    &entropy,
-                    self.params.num_replicas,
-                    self.params.dimensions,
-                    self.params.beta,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&self.replicas)
+                .arg(&self.energies)
+                .arg(&mean_state)
+                .arg(&covariance)
+                .arg(&entropy)
+                .arg(&self.params.num_replicas)
+                .arg(&self.params.dimensions)
+                .arg(&self.params.beta)
+                .launch(config)?;
         }
-        .context("Failed to launch statistics kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
         // Download results
-        let mean_vec = self.device.dtoh_sync_copy(&mean_state)?;
-        let cov_vec = self.device.dtoh_sync_copy(&covariance)?;
-        let entropy_val = self.device.dtoh_sync_copy(&entropy)?;
+        let mean_vec: Vec<f32> = self.stream.clone_dtoh(&mean_state)?;
+        let cov_vec: Vec<f32> = self.stream.clone_dtoh(&covariance)?;
+        let entropy_val: Vec<f32> = self.stream.clone_dtoh(&entropy)?;
 
         Ok(EnsembleStatistics {
             mean_state: mean_vec,
@@ -434,9 +395,9 @@ impl PimcGpu {
 
     /// Gets current observables (energy, magnetization, acceptance)
     pub fn get_observables(&self) -> Result<PimcObservables> {
-        let energies = self.device.dtoh_sync_copy(&self.energies)?;
-        let magnetizations = self.device.dtoh_sync_copy(&self.magnetizations)?;
-        let acceptance_rates = self.device.dtoh_sync_copy(&self.acceptance_rates)?;
+        let energies: Vec<f32> = self.stream.clone_dtoh(&self.energies)?;
+        let magnetizations: Vec<f32> = self.stream.clone_dtoh(&self.magnetizations)?;
+        let acceptance_rates: Vec<f32> = self.stream.clone_dtoh(&self.acceptance_rates)?;
 
         // Compute averages
         let num_replicas = self.params.num_replicas as usize;
@@ -457,7 +418,7 @@ impl PimcGpu {
     /// Gets the best (lowest energy) configuration
     pub fn get_best_configuration(&self) -> Result<Vec<f32>> {
         // Download energies to find best replica
-        let energies = self.device.dtoh_sync_copy(&self.energies)?;
+        let energies: Vec<f32> = self.stream.clone_dtoh(&self.energies)?;
 
         let (best_idx, _) = energies
             .iter()
@@ -466,7 +427,7 @@ impl PimcGpu {
             .unwrap();
 
         // Download best replica
-        let replicas = self.device.dtoh_sync_copy(&self.replicas)?;
+        let replicas: Vec<f32> = self.stream.clone_dtoh(&self.replicas)?;
         let start = best_idx * self.params.dimensions as usize;
         let end = start + self.params.dimensions as usize;
 
@@ -487,8 +448,7 @@ impl PimcGpu {
             temps[i] = t_min * alpha.powi(i as i32);
         }
 
-        self.device
-            .htod_sync_copy_into(&temps, &mut self.temperatures)
+        self.temperatures = self.stream.clone_htod(&temps)
             .context("Failed to update temperatures")?;
 
         Ok(())
@@ -497,7 +457,7 @@ impl PimcGpu {
     /// Gets performance metrics
     pub fn get_performance_metrics(&self) -> Result<PimcMetrics> {
         // Allocate metrics buffer
-        let metrics = self.device.alloc_zeros::<f32>(4)?;
+        let metrics = self.stream.alloc_zeros::<f32>(4)?;
 
         // Launch metrics kernel
         let config = LaunchConfig {
@@ -506,30 +466,24 @@ impl PimcGpu {
             shared_mem_bytes: 0,
         };
 
-        let kernel = self
-            .device
-            .get_func("pimc", "pimc_performance_metrics")
-            .context("Failed to get metrics kernel")?;
+        let kernel = self.module.load_function("pimc_performance_metrics")
+            .context("Failed to load metrics kernel")?;
 
         let total_exchanges = 100; // Placeholder
 
         unsafe {
-            kernel.launch(
-                config,
-                (
-                    &self.acceptance_rates,
-                    &self.exchange_counts,
-                    &metrics,
-                    self.params.num_replicas,
-                    total_exchanges,
-                ),
-            )
+            self.stream.launch_builder(&kernel)
+                .arg(&self.acceptance_rates)
+                .arg(&self.exchange_counts)
+                .arg(&metrics)
+                .arg(&self.params.num_replicas)
+                .arg(&total_exchanges)
+                .launch(config)?;
         }
-        .context("Failed to launch metrics kernel")?;
 
-        self.device.synchronize()?;
+        self.stream.synchronize()?;
 
-        let metrics_vec = self.device.dtoh_sync_copy(&metrics)?;
+        let metrics_vec: Vec<f32> = self.stream.clone_dtoh(&metrics)?;
 
         Ok(PimcMetrics {
             mc_efficiency: metrics_vec[0],
@@ -583,7 +537,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_pimc_initialization() {
-        let device = CudaDevice::new(0).unwrap();
+        let device = CudaContext::new(0).unwrap();
         let pimc = PimcGpu::new(Arc::new(device), 32, 100);
         assert!(pimc.is_ok());
     }
@@ -591,7 +545,7 @@ mod tests {
     #[test]
     #[ignore] // Requires GPU
     fn test_pimc_evolution() {
-        let device = Arc::new(CudaDevice::new(0).unwrap());
+        let device = Arc::new(CudaContext::new(0).unwrap());
         let mut pimc = PimcGpu::new(device, 16, 50).unwrap();
 
         pimc.initialize_random(42).unwrap();

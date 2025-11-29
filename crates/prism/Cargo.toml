@@ -20,6 +20,7 @@ prism-gpu = { workspace = true, features = ["cuda"] }
 prism-gnn = { workspace = true }
 prism-lbs = { workspace = true }
 prism-mec = { workspace = true }
+prism-cli = { path = "../prism-cli" }
 
 # TUI Framework
 ratatui = { version = "0.28", features = ["all-widgets"] }
