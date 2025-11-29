@@ -43,6 +43,9 @@ log = { workspace = true }
 # GPU
 cudarc = { workspace = true, optional = true }
 
+# ONNX Runtime (optional, for future direct ONNX inference)
+# ort = { workspace = true, optional = true }
+
 [features]
 default = []
 cuda = ["cudarc", "prism-gpu/cuda"]

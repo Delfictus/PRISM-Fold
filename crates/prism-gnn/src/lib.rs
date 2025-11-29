@@ -93,13 +93,39 @@ impl GnnModel {
  self
  }
 
- /// TODO(GPU-GNN-01): GPU-accelerated forward pass
+ /// GPU-accelerated forward pass using E3EquivariantGnn
  pub fn forward(
  &self,
  graph: &DiGraph<f32, f32>,
  ) -> Result<HashMap<NodeIndex, Vec<f32>>, PrismError> {
- // Placeholder for GPU-accelerated GNN forward pass
- Ok(HashMap::new())
+ // Use E3EquivariantGnn for actual inference
+ let gnn = models::E3EquivariantGnn::new(self.config.clone());
+
+ #[cfg(feature = "cuda")]
+ let gnn = if let Some(ref device) = self.gpu_device {
+ gnn.with_gpu(device.clone())
+ } else {
+ gnn
+ };
+
+ let prediction = gnn.predict(graph).map_err(|e| {
+ PrismError::GnnError(format!("GNN forward pass failed: {}", e))
+ })?;
+
+ // Convert node embeddings from usize keys to NodeIndex
+ let result: HashMap<NodeIndex, Vec<f32>> = prediction
+ .node_embeddings
+ .into_iter()
+ .map(|(idx, emb)| (NodeIndex::new(idx), emb))
+ .collect();
+
+ log::debug!(
+ "GNN forward: {} embeddings, chromatic estimate: {}",
+ result.len(),
+ prediction.chromatic_number
+ );
+
+ Ok(result)
  }
 
  /// TODO(GPU-GNN-02): GPU-accelerated backward pass and gradient computation

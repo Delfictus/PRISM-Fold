@@ -34,6 +34,7 @@ pub mod stream_manager;
 pub mod tda;
 pub mod thermodynamic;
 pub mod transfer_entropy;
+pub mod ultra_kernel;
 pub mod whcr;
 
 // Re-export commonly used items
@@ -68,4 +69,5 @@ pub use stream_manager::{
 pub use tda::TdaGpu;
 pub use thermodynamic::ThermodynamicGpu;
 pub use transfer_entropy::{CausalGraph, TEMatrix, TEParams, TransferEntropyGpu};
+pub use ultra_kernel::UltraKernelGpu;
 pub use whcr::{RepairResult, WhcrGpu};

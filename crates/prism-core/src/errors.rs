@@ -25,6 +25,10 @@ pub enum PrismError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// GNN inference errors
+    #[error("GNN error: {0}")]
+    GnnError(String),
+
     /// I/O errors (file reading, PTX loading, telemetry writing)
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
@@ -95,6 +99,11 @@ impl PrismError {
     /// Creates an internal error.
     pub fn internal(message: impl Into<String>) -> Self {
         PrismError::Internal(message.into())
+    }
+
+    /// Creates a GNN error.
+    pub fn gnn(message: impl Into<String>) -> Self {
+        PrismError::GnnError(message.into())
     }
 
     /// Checks if this is a retriable error.
