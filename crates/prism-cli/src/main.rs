@@ -1,4 +1,7 @@
-//! PRISM v2 CLI entry point.
+//! PRISM-Fold CLI entry point.
+//!
+//! Phase Resonance Integrated Solver Machine for Molecular Folding
+//! GPU-accelerated graph coloring and ligand binding site prediction.
 
 use anyhow::Result;
 use clap::Parser;
@@ -8,9 +11,13 @@ use prism_pipeline::{PipelineConfig, PipelineOrchestrator};
 use std::io::Write;
 use std::path::Path;
 
+/// PRISM-Fold version from Cargo.toml
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser, Debug)]
 #[command(name = "prism-cli")]
-#[command(about = "PRISM v2: GPU-accelerated graph coloring with FluxNet RL", long_about = None)]
+#[command(version = VERSION)]
+#[command(about = "PRISM-Fold: GPU-accelerated graph coloring with FluxNet RL", long_about = None)]
 struct Args {
     /// Input graph file path (required for coloring mode)
     #[arg(short, long)]
@@ -719,7 +726,7 @@ fn main() -> Result<()> {
             .init();
     }
 
-    log::info!("PRISM v2 CLI - Starting");
+    log::info!("PRISM-Fold {} - Starting", VERSION);
 
     // ========================================================================
     // Mode Selection & Dispatch

@@ -43,6 +43,6 @@ chrono = { workspace = true }
 [features]
 default = []
 gpu = ["prism-gpu"]
-cuda = ["gpu", "prism-phases/cuda", "prism-gpu/cuda"]
+cuda = ["gpu", "prism-phases/cuda", "prism-gpu/cuda", "prism-mec/cuda", "prism-whcr/cuda"]
 telemetry_sqlite = ["sqlx"]
 lbs = ["prism-lbs"]

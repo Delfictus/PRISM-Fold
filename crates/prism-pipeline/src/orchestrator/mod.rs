@@ -659,7 +659,7 @@ impl PipelineOrchestrator {
         // CREATE GEOMETRY SYNCHRONIZER (ADVANCED GPU-RESIDENT)
         // =========================================================================
         #[cfg(feature = "cuda")]
-        let mut geometry_sync = if let Some(ref gpu_ctx_any) = self.context.gpu_context {
+        let mut geometry_sync: Option<GeometrySynchronizer> = if let Some(ref gpu_ctx_any) = self.context.gpu_context {
             // Try to downcast as Arc<GpuContext>
             if let Ok(gpu_ctx_arc) = gpu_ctx_any
                 .clone()

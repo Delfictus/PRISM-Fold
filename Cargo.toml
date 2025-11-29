@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    # Main binary - world-class TUI
+    "crates/prism",
+
     # Core compute crates
     "crates/prism-core",
     "crates/prism-gpu",
@@ -9,7 +12,7 @@ members = [
     "crates/prism-phases",
     "crates/prism-whcr",
     "crates/prism-pipeline",
-    "crates/prism-cli",
+    "crates/prism-cli",  # Legacy CLI (deprecated)
 
     # Specialized compute crates
     "crates/prism-ontology",
