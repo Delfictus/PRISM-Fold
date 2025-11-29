@@ -43,7 +43,7 @@ bincode = "1.3"
 toml = "0.8"
 
 # GPU acceleration
-cudarc = { version = "0.9", features = ["std"] }
+cudarc = { version = "0.18.1", features = ["std", "driver", "cuda-12060"] }
 
 # Math and scientific computing
 ndarray = "0.15"

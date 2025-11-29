@@ -112,10 +112,30 @@ impl CudaStreamPool {
     /// Synchronize all streams
     ///
     /// Blocks until all pending operations complete
-    /// Note: cudarc 0.9 synchronizes automatically, this is a no-op
+    /// cudarc 0.11: Uses device-level synchronization (syncs all streams)
     pub fn synchronize_all(&self) -> Result<()> {
-        // cudarc 0.9: operations are synchronous on device
-        // Explicit synchronization not needed
+        self.device.synchronize().map_err(|e| {
+            PRCTError::GpuError(format!("Failed to synchronize device: {:?}", e))
+        })?;
+        Ok(())
+    }
+
+    /// Synchronize specific stream by index
+    ///
+    /// Note: cudarc 0.11 only supports device-level sync, so this syncs all streams
+    pub fn synchronize_stream(&self, index: usize) -> Result<()> {
+        if index >= self.streams.len() {
+            return Err(PRCTError::GpuError(format!(
+                "Invalid stream index: {} (max: {})",
+                index,
+                self.streams.len() - 1
+            )));
+        }
+
+        self.device.synchronize().map_err(|e| {
+            PRCTError::GpuError(format!("Failed to synchronize device (stream {}): {:?}", index, e))
+        })?;
+
         Ok(())
     }
 

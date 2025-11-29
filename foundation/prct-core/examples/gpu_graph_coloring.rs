@@ -4,8 +4,10 @@
 //!
 //! Run with: cargo run --features cuda --example gpu_graph_coloring
 
+#[cfg(feature = "cuda")]
+use prct_core::adapters::NeuromorphicAdapter;
 use prct_core::{
-    adapters::{CouplingAdapter, NeuromorphicAdapter, QuantumAdapter},
+    adapters::{CouplingAdapter, QuantumAdapter},
     ports::{NeuromorphicEncodingParams, NeuromorphicPort},
 };
 use shared_types::*;

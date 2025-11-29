@@ -56,7 +56,7 @@ regex = "1.9"
 lazy_static = "1.4"
 
 # GPU support
-cudarc = { version = "0.9", optional = true }
+cudarc = { workspace = true, optional = true }
 
 # Biochemistry
 bio = "1.3"

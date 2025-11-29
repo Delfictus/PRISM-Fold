@@ -1040,6 +1040,44 @@ impl WhcrGpu {
         self.device.synchronize()?;
         Ok(())
     }
+
+    /// Async conflict counting - returns immediately without blocking
+    ///
+    /// Launches the conflict counting kernel on the dedicated stream and returns
+    /// immediately. Call `synchronize()` to wait for completion before reading results.
+    ///
+    /// # Example
+    /// ```ignore
+    /// whcr.count_conflicts_async()?;
+    /// // Do other work here...
+    /// whcr.synchronize()?;
+    /// let conflicts = whcr.get_conflicts()?;
+    /// ```
+    pub fn count_conflicts_async(&self) -> Result<()> {
+        let cfg = LaunchConfig::for_num_elems(self.num_vertices as u32);
+        let params = (
+            &self.d_coloring,
+            &self.d_adjacency_row_ptr,
+            &self.d_adjacency_col_idx,
+            &self.d_conflict_counts_f32,
+            self.num_vertices as i32,
+        );
+        unsafe {
+            self.count_conflicts_f32
+                .clone()
+                .launch(cfg, params)?
+        };
+        Ok(()) // Returns immediately - kernel runs asynchronously
+    }
+
+    /// Synchronize stream - wait for all async operations to complete
+    ///
+    /// Blocks until all operations on the WHCR stream are complete.
+    /// Must be called before reading results from async operations.
+    pub fn synchronize(&self) -> Result<()> {
+        self.device.synchronize()?;
+        Ok(())
+    }
 }
 
 /// Convert adjacency list to CSR format

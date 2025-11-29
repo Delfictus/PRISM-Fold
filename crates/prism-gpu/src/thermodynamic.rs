@@ -86,6 +86,7 @@ impl ThermodynamicGpu {
             .ok_or_else(|| ThermodynamicError::KernelNotFound("replica_swap".to_string()))?;
 
         log::info!("Thermodynamic GPU module loaded successfully");
+
         Ok(Self {
             device,
             kernel_anneal,
@@ -184,6 +185,10 @@ impl ThermodynamicGpu {
             iterations,
             stress_scalar,
             temp_max_adjusted
+        );
+
+        log::info!(
+            "Using default CUDA stream for replica execution (cudarc 0.11)"
         );
 
         // Convert adjacency list to CSR format
@@ -291,6 +296,7 @@ impl ThermodynamicGpu {
                     shared_mem_bytes: 0,
                 };
 
+                // Launch kernel on default stream (processes all replicas in one kernel)
                 unsafe {
                     self.kernel_anneal.clone().launch(
                         config,
@@ -322,6 +328,7 @@ impl ThermodynamicGpu {
                     shared_mem_bytes: 0,
                 };
 
+                // Launch replica swap kernel on default stream
                 unsafe {
                     self.kernel_swap_replicas.clone().launch(
                         swap_config,
@@ -544,6 +551,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires GPU
     fn test_adjacency_to_csr() {
         let device = Arc::new(CudaDevice::new(0).unwrap_or_else(|_| {
             panic!("Test requires GPU");

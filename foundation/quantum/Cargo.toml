@@ -17,7 +17,7 @@ rand = "0.8"
 
 # CPU optimization + GPU acceleration dependencies
 rayon = "1.10"
-cudarc = { version = "0.9", features = ["std"] }
+cudarc = { version = "0.11", features = ["std", "cuda-12050"] }
 candle-core = { version = "0.8" }
 
 [lib]

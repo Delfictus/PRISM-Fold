@@ -294,7 +294,7 @@ mod tests {
             num_edges: 3,
             edges: vec![(0, 1, 1.0), (1, 2, 1.0), (0, 2, 1.0)],
             adjacency: vec![false, true, true, true, false, true, true, true, false],
-            coordinates: vec![],
+            coordinates: None,
         };
 
         let features = compute_landmark_distances(&graph, 2, "hop").unwrap();
@@ -321,7 +321,7 @@ mod tests {
                 false, true, false, false, true, false, true, false, false, true, false, true,
                 false, false, true, false,
             ],
-            coordinates: vec![],
+            coordinates: None,
         };
 
         let features = compute_landmark_distances(&graph, 2, "hop").unwrap();

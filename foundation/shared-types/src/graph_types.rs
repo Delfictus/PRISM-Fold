@@ -22,6 +22,33 @@ pub struct Graph {
     pub coordinates: Option<alloc::vec::Vec<(f64, f64)>>,
 }
 
+impl Graph {
+    /// Creates a new graph with the specified number of vertices
+    pub fn new(num_vertices: usize) -> Self {
+        Self {
+            num_vertices,
+            num_edges: 0,
+            edges: alloc::vec::Vec::new(),
+            adjacency: alloc::vec![false; num_vertices * num_vertices],
+            coordinates: None,
+        }
+    }
+
+    /// Adds an undirected edge between two vertices with the given weight
+    pub fn add_edge(&mut self, u: usize, v: usize, weight: f64) {
+        if u < self.num_vertices && v < self.num_vertices && u != v {
+            // Add to edge list
+            self.edges.push((u, v, weight));
+
+            // Update adjacency matrix (undirected: both directions)
+            self.adjacency[u * self.num_vertices + v] = true;
+            self.adjacency[v * self.num_vertices + u] = true;
+
+            self.num_edges += 1;
+        }
+    }
+}
+
 /// Graph coloring solution
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -103,6 +103,11 @@ pub mod gpu_thermodynamic_multi;
 pub use gpu_thermodynamic_multi::equilibrate_thermodynamic_multi_gpu;
 
 #[cfg(feature = "cuda")]
+pub mod gpu_thermodynamic_streams;
+#[cfg(feature = "cuda")]
+pub use gpu_thermodynamic_streams::{ThermodynamicContext, ReplicaState, GraphGpuData};
+
+#[cfg(feature = "cuda")]
 pub mod gpu_active_inference;
 #[cfg(feature = "cuda")]
 pub use gpu_active_inference::{active_inference_policy_gpu, ActiveInferencePolicyGpu};

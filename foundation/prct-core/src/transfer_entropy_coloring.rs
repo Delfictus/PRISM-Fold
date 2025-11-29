@@ -292,7 +292,7 @@ mod tests {
             mean_phase: 1.0,
         };
 
-        let ordering = compute_transfer_entropy_ordering(&graph, &kuramoto).unwrap();
+        let ordering = compute_transfer_entropy_ordering(&graph, &kuramoto, None, 0.5).unwrap();
         assert_eq!(ordering.len(), 3);
     }
 }
