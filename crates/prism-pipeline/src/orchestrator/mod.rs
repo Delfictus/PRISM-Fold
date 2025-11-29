@@ -752,24 +752,14 @@ impl PipelineOrchestrator {
             let phase_name = self.phases[i].name();
             log::info!("Executing phase: {}", phase_name);
 
-            // Set WHCR pending flag for phases that will be followed by WHCR
+            // WHCR pending flag: DISABLED because WHCR is disabled in this build
+            // This allows phases to use their own internal conflict_repair module
+            // When WHCR is re-enabled, uncomment the block below
             #[cfg(feature = "cuda")]
             if geometry_sync.is_some() {
-                // Phase 2 will be followed by WHCR-Phase2
-                if phase_name.contains("Phase2") || phase_name.contains("Thermodynamic") {
-                    self.context.set_whcr_pending(true);
-                    log::debug!("WHCR pending flag set for Phase 2");
-                }
-                // Phase 3 will be followed by WHCR-Phase3 (after Phase 4)
-                else if phase_name.contains("Phase3") || phase_name.contains("Quantum") {
-                    self.context.set_whcr_pending(true);
-                    log::debug!("WHCR pending flag set for Phase 3");
-                }
-                // Phase 7 will be followed by WHCR-Phase7
-                else if phase_name.contains("Phase7") || phase_name.contains("Ensemble") {
-                    self.context.set_whcr_pending(true);
-                    log::debug!("WHCR pending flag set for Phase 7");
-                }
+                // WHCR is currently disabled - don't set pending flag
+                // This allows Phase2/Phase3 to use internal conflict repair
+                self.context.set_whcr_pending(false);
             }
 
             // Execute phase with retry logic

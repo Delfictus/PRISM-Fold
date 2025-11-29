@@ -43,3 +43,7 @@ prometheus = { workspace = true }
 
 # Graph processing
 petgraph = { workspace = true }
+
+[features]
+default = ["cuda"]
+cuda = ["prism-pipeline/cuda", "prism-phases/cuda"]
