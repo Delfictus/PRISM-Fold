@@ -13,6 +13,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use std::io::{self, stdout};
+use std::path::Path;
 
 mod ai;
 pub mod config;
@@ -54,6 +55,14 @@ struct Args {
     /// Input file (graph .col or protein .pdb)
     #[arg(short, long)]
     input: Option<String>,
+
+    /// Output file path (JSON for results)
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Output format: json, csv
+    #[arg(long, default_value = "json")]
+    format: String,
 
     /// Mode: auto, coloring, biomolecular, materials
     #[arg(short, long, default_value = "coloring")]
@@ -256,13 +265,141 @@ fn main() -> Result<()> {
             .init();
     }
 
-    if args.headless {
-        // Headless mode - minimal output, no TUI
+    // Handle biomolecular mode separately - no TUI, direct LBS pipeline
+    // Also auto-detect biomolecular mode for .pdb files in batch mode
+    let is_pdb_input = args.input.as_ref()
+        .map(|p| p.to_lowercase().ends_with(".pdb"))
+        .unwrap_or(false);
+
+    if args.mode == "biomolecular" || (args.batch && is_pdb_input) {
+        return run_biomolecular(args);
+    }
+
+    if args.headless || args.batch {
+        // Headless/batch mode - minimal output, no TUI
         run_headless(args)
     } else {
         // Full TUI mode
         run_tui(args)
     }
+}
+
+/// Run biomolecular mode (LBS prediction) - DIRECT LIBRARY INTEGRATION
+/// Supports --batch mode with -o output.json for validation suite
+fn run_biomolecular(args: Args) -> Result<()> {
+    use prism_lbs::{LbsConfig, PrismLbs, ProteinStructure};
+
+    let input_path = args
+        .input
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--input is required for biomolecular mode (PDB file)"))?;
+
+    if !Path::new(input_path).exists() {
+        return Err(anyhow::anyhow!("PDB file not found: {}", input_path));
+    }
+
+    // Determine output path - use --output if provided, else default to lbs_results/
+    let (output_json, output_dir) = if let Some(ref out_path) = args.output {
+        let out = std::path::PathBuf::from(out_path);
+        let dir = out.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+        (Some(out), dir)
+    } else {
+        (None, std::path::PathBuf::from("lbs_results"))
+    };
+
+    // In batch mode, minimize output
+    let quiet = args.batch && args.output.is_some();
+
+    if !quiet {
+        println!("◆ PRISM-Fold {} - Biomolecular Mode\n", VERSION);
+        println!("  Input: {}", input_path);
+    }
+
+    // Initialize logger for headless mode
+    if args.verbose {
+        env_logger::Builder::from_default_env()
+            .filter_level(log::LevelFilter::Info)
+            .init();
+    }
+
+    // Create output directory
+    std::fs::create_dir_all(&output_dir)?;
+    if !quiet {
+        println!("  Output: {}/\n", output_dir.display());
+    }
+
+    // Load protein structure directly
+    if !quiet { println!("  Loading protein structure..."); }
+    let structure = ProteinStructure::from_pdb_file(Path::new(input_path))?;
+
+    if !quiet {
+        println!("  Loaded: {} residues, {} atoms, {} chains",
+            structure.residues.len(),
+            structure.atoms.len(),
+            structure.chain_residue_indices.len()
+        );
+    }
+
+    // Create LBS predictor with default config (GPU-accelerated)
+    if !quiet { println!("\n  Initializing PRISM-LBS predictor (GPU: {})...", args.gpu); }
+    let mut config = LbsConfig::default();
+    config.use_gpu = args.gpu;
+
+    let predictor = PrismLbs::new(config)?;
+
+    // Run prediction
+    if !quiet { println!("  Running 7-phase binding site detection...\n"); }
+    let start = std::time::Instant::now();
+    let pockets = predictor.predict(&structure)?;
+    let duration = start.elapsed();
+
+    // Write results
+    if !quiet { println!("\n  Writing results..."); }
+
+    // If custom output path specified (batch mode), write JSON there directly
+    if let Some(ref json_path) = output_json {
+        prism_lbs::output::write_pockets_json(&pockets, &structure, json_path)?;
+    } else {
+        // Default behavior: write to lbs_results/
+        prism_lbs::output::write_pockets_pdb(&pockets, &structure, &output_dir.join("pockets.pdb"))?;
+        prism_lbs::output::write_pockets_json(&pockets, &structure, &output_dir.join("pockets.json"))?;
+    }
+
+    if !quiet && output_dir.join("visualize_pockets.pml").exists() {
+        println!("  PyMOL script: {}/visualize_pockets.pml", output_dir.display());
+    }
+
+    // Print summary (always show for successful batch runs, but minimal)
+    if quiet {
+        // Batch mode: just output pocket count for scripts to parse
+        println!("{}", pockets.len());
+    } else {
+        println!("\n✅ LBS prediction complete in {:.2}s!", duration.as_secs_f64());
+        if let Some(ref json_path) = output_json {
+            println!("   Results saved to: {}", json_path.display());
+        } else {
+            println!("   Results saved to: {}/", output_dir.display());
+        }
+    }
+
+    if !quiet && !pockets.is_empty() {
+        println!("\n   Found {} pockets:", pockets.len());
+        for (i, pocket) in pockets.iter().take(5).enumerate() {
+            let class = pocket.druggability_score.classification.as_str();
+            println!(
+                "   {}. Vol: {:.1}Å³, Druggability: {:.3} ({}), {} residues",
+                i + 1,
+                pocket.volume,
+                pocket.druggability_score.total,
+                class,
+                pocket.residue_indices.len()
+            );
+        }
+    } else if !quiet {
+        println!("\n   No pockets detected (structure may be too small or lack cavities)");
+    }
+
+    Ok(())
 }
 
 fn run_tui(args: Args) -> Result<()> {

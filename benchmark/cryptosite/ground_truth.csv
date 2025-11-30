@@ -1,0 +1,28 @@
+# CryptoSite Benchmark - Ground Truth
+# Format: apo_pdb,holo_pdb,protein_name,cryptic_residues,site_description,difficulty
+#
+# Difficulty levels:
+#   easy   = pocket partially visible in apo
+#   medium = pocket barely visible in apo  
+#   hard   = pocket completely absent in apo
+#
+# cryptic_residues = residues that form the cryptic site (comma-separated)
+#
+1JWP,1PZO,TEM-1 beta-lactamase,"238,240,244,276","Allosteric site 16Å from active site",hard
+1M47,1M48,Interleukin-2,"30,33,34,37,38,41,42,45","Groove between helices A and B",hard
+1J3H,1FMO,Protein Kinase A,"49,50,51,52,54,55,57,72","Myristate binding pocket",medium
+1K8K,1K7E,p38 MAP Kinase,"71,74,75,104,106,107,108","DFG-out allosteric pocket",medium
+1OPK,1Q5K,Aldose Reductase,"48,49,112,298,299,300","Specificity pocket",easy
+1G4E,1ZGY,Factor Xa,"99,143,146,174,175,176,177","S4 subpocket",medium
+1FJS,1LQD,Bcl-xL,"96,99,100,103,104,107,108,111","BH3 binding groove",hard
+1YET,1YDT,Thymidylate Synthase,"23,48,52,55,169,170,177","Folate binding pocket extension",medium
+1SQN,1UNL,Thermolysin,"119,120,122,123,127,128,130","S1' subpocket",easy
+3ERT,1GWR,Estrogen Receptor alpha,"343,346,347,349,350,351,353","Helix 12 binding groove",hard
+1LI4,1OG5,Caspase-7,"233,234,236,276,277,278","Allosteric site",hard
+1EX8,1OI9,Cytochrome P450 2C9,"72,74,97,100,102,103","Access channel",medium
+1PKD,1A28,Pyruvate Kinase,"53,54,55,56,117,118,119","Allosteric activator site",medium
+2FGU,2HYY,HSP90,"52,54,91,94,98,107,108,111","ATP lid cryptic pocket",hard
+1YQY,2BU4,Chk1 Kinase,"86,88,89,90,148,149,150","Selectivity pocket",medium
+1KS9,1OWE,Renin,"73,74,75,218,219,220,289","Flap pocket",hard
+1F3D,1JD0,Penicillin Binding Protein,"322,325,326,329,330,422,423","Allosteric trigger site",hard
+2AYN,2B63,Thrombin,"60,61,62,63,64","60s loop pocket",medium
