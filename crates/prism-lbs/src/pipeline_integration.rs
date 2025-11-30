@@ -107,8 +107,8 @@ impl FluxNetWeightOptimizer {
     /// Compute reward from validation metrics
     /// Higher is better: success_rate + coverage - (distance penalty)
     pub fn compute_reward(&self, metrics: &ValidationMetrics) -> f64 {
-        let distance_penalty = (metrics.center_distance / 4.0).min(2.0);
-        let reward = metrics.success_rate
+        let distance_penalty = (metrics.center_distance() / 4.0).min(2.0);
+        let reward = metrics.success_rate()
             + 0.5 * metrics.ligand_coverage
             + 0.3 * metrics.pocket_precision
             - 0.4 * distance_penalty;
@@ -202,7 +202,7 @@ impl FluxNetWeightOptimizer {
             let lbs = PrismLbs::new(config)?;
             let pockets = lbs.predict(structure)?;
 
-            let metrics = ValidationMetrics::compute(&pockets, ligand_coords, threshold);
+            let metrics = ValidationMetrics::compute_batch(&pockets, ligand_coords, threshold);
             total_reward += self.compute_reward(&metrics);
             self.update(&metrics);
         }

@@ -239,7 +239,7 @@ impl LbsTrainer {
         let pockets = lbs.predict(&structure)?;
 
         // Compute validation metrics
-        let metrics = ValidationMetrics::compute(
+        let metrics = ValidationMetrics::compute_batch(
             &pockets,
             &entry.ligand_coords,
             self.config.success_threshold,
@@ -275,14 +275,14 @@ impl LbsTrainer {
                     self.conservation_loader.apply(&mut structure);
 
                     if let Ok(pockets) = lbs.predict(&structure) {
-                        let metrics = ValidationMetrics::compute(
+                        let metrics = ValidationMetrics::compute_batch(
                             &pockets,
                             &entry.ligand_coords,
                             self.config.success_threshold,
                         );
 
-                        total_success += metrics.success_rate;
-                        total_distance += metrics.center_distance;
+                        total_success += metrics.success_rate();
+                        total_distance += metrics.center_distance();
                         total_coverage += metrics.ligand_coverage;
                         count += 1;
                     }
@@ -426,7 +426,7 @@ impl LbsTrainer {
                                 let lbs = PrismLbs::new(config)?;
                                 let pockets = lbs.predict(&entry.structure)?;
 
-                                let metrics = ValidationMetrics::compute(
+                                let metrics = ValidationMetrics::compute_batch(
                                     &pockets,
                                     &entry.ligand_coords,
                                     self.config.success_threshold,
@@ -455,12 +455,12 @@ impl LbsTrainer {
                     if let Some(ref loader) = self.pdbbind_loader {
                         if let Ok(entry) = loader.load_entry(pdb_id) {
                             if let Ok(pockets) = lbs.predict(&entry.structure) {
-                                let metrics = ValidationMetrics::compute(
+                                let metrics = ValidationMetrics::compute_batch(
                                     &pockets,
                                     &entry.ligand_coords,
                                     self.config.success_threshold,
                                 );
-                                total_score += metrics.success_rate;
+                                total_score += metrics.success_rate();
                                 count += 1;
                             }
                         }
