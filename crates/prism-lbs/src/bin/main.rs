@@ -2,7 +2,11 @@ use clap::{ArgAction, Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use prism_lbs::{LbsConfig, OutputConfig, OutputFormat, PrismLbs, ProteinStructure};
+use prism_lbs::{
+    LbsConfig, OutputConfig, OutputFormat, PrismLbs, ProteinStructure,
+    UnifiedDetector, UnifiedOutput, Pocket,
+    graph::ProteinGraphBuilder,
+};
 
 #[derive(Parser)]
 #[command(name = "prism-lbs")]
@@ -47,6 +51,14 @@ struct Cli {
     /// Top N pockets to keep
     #[arg(long)]
     top_n: Option<usize>,
+
+    /// Use unified detector (geometric + softspot cryptic site detection)
+    #[arg(long, action = ArgAction::SetTrue)]
+    unified: bool,
+
+    /// Use softspot-only detection (cryptic sites only, no geometry)
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "unified")]
+    softspot_only: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -122,40 +134,86 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
-    let structure = ProteinStructure::from_pdb_file(&cli.input)?;
-    let predictor = PrismLbs::new(config.clone())?;
-    let pockets = predictor.predict(&structure)?;
-
+    let mut structure = ProteinStructure::from_pdb_file(&cli.input)?;
     let base = resolve_output_base(&cli.output, &cli.input);
-    for fmt in &config.output.formats {
-        let mut out_path = base.clone();
-        match fmt {
-            OutputFormat::Pdb => {
-                out_path.set_extension("pdb");
+
+    // Choose detection mode
+    if cli.unified || cli.softspot_only {
+        // Unified or softspot-only mode
+        let structure_name = cli.input.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("structure");
+
+        let unified_output = if cli.softspot_only {
+            // Softspot-only: run directly on atoms
+            let detector = UnifiedDetector::with_config(
+                prism_lbs::unified::UnifiedDetectorConfig {
+                    enable_geometric: false,
+                    enable_softspot: true,
+                    max_pockets: config.top_n,
+                    ..Default::default()
+                }
+            );
+            detector.detect_from_atoms(&structure.atoms, structure_name)
+        } else {
+            // Unified: build graph and run both detectors
+            structure.compute_surface_accessibility()?;
+            let graph_builder = ProteinGraphBuilder::new(config.graph.clone());
+            let graph = graph_builder.build(&structure)?;
+
+            let detector = UnifiedDetector::with_config(
+                prism_lbs::unified::UnifiedDetectorConfig {
+                    enable_geometric: true,
+                    enable_softspot: true,
+                    max_pockets: config.top_n,
+                    ..Default::default()
+                }
+            );
+            detector.detect(&graph, structure_name)?
+        };
+
+        // Write unified JSON output
+        let mut json_path = base.clone();
+        json_path.set_extension("json");
+        ensure_parent_dir(&json_path)?;
+        let json_content = serde_json::to_string_pretty(&unified_output)?;
+        fs::write(&json_path, json_content)?;
+        log::info!("Wrote unified results to {:?}", json_path);
+    } else {
+        // Standard geometric mode
+        let predictor = PrismLbs::new(config.clone())?;
+        let pockets = predictor.predict(&structure)?;
+
+        for fmt in &config.output.formats {
+            let mut out_path = base.clone();
+            match fmt {
+                OutputFormat::Pdb => {
+                    out_path.set_extension("pdb");
+                }
+                OutputFormat::Json => {
+                    out_path.set_extension("json");
+                }
+                OutputFormat::Csv => {
+                    out_path.set_extension("csv");
+                }
             }
-            OutputFormat::Json => {
-                out_path.set_extension("json");
-            }
-            OutputFormat::Csv => {
-                out_path.set_extension("csv");
+            ensure_parent_dir(&out_path)?;
+            match fmt {
+                OutputFormat::Pdb => {
+                    prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
+                }
+                OutputFormat::Json => {
+                    prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                }
+                OutputFormat::Csv => {}
             }
         }
-        ensure_parent_dir(&out_path)?;
-        match fmt {
-            OutputFormat::Pdb => {
-                prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
-            }
-            OutputFormat::Json => {
-                prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
-            }
-            OutputFormat::Csv => {}
+        if config.output.include_pymol_script {
+            let mut pymol_path = base.clone();
+            pymol_path.set_extension("pml");
+            ensure_parent_dir(&pymol_path)?;
+            prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())?;
         }
-    }
-    if config.output.include_pymol_script {
-        let mut pymol_path = base.clone();
-        pymol_path.set_extension("pml");
-        ensure_parent_dir(&pymol_path)?;
-        prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())?;
     }
     Ok(())
 }

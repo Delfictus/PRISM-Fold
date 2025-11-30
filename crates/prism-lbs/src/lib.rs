@@ -17,15 +17,21 @@ pub mod phases;
 pub mod pipeline_integration;
 pub mod pocket;
 pub mod scoring;
+pub mod softspot;
 pub mod structure;
 pub mod training;
+pub mod unified;
 pub mod validation;
 
 // Re-exports
 pub use graph::{GraphConfig, ProteinGraph, ProteinGraphBuilder};
 pub use pocket::{Pocket, PocketDetector, PocketProperties};
 pub use scoring::{DrugabilityClass, DruggabilityScore, DruggabilityScorer};
+pub use softspot::{CrypticCandidate, CrypticConfidence, SoftSpotDetector};
 pub use structure::{Atom, PdbParseOptions, ProteinStructure, Residue};
+pub use unified::{
+    Confidence, DetectionType, Evidence, UnifiedDetector, UnifiedOutput, UnifiedPocket,
+};
 
 use anyhow::Result;
 #[cfg(feature = "cuda")]

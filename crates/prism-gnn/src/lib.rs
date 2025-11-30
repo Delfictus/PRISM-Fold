@@ -13,6 +13,10 @@ pub mod layers;
 pub mod models;
 pub mod training;
 
+// ONNX Runtime integration (feature-gated)
+#[cfg(feature = "ort")]
+pub mod onnx_runtime;
+
 #[cfg(feature = "cuda")]
 use std::sync::Arc;
 
@@ -87,7 +91,7 @@ impl GnnModel {
 
  #[cfg(feature = "cuda")]
  pub fn with_gpu(mut self, device: Arc<cudarc::driver::CudaContext>) -> Self {
- let stream = Arc::new(device.default_stream());
+ let stream = device.default_stream();
  self.gpu_device = Some(device);
  self.gpu_stream = Some(stream);
  self

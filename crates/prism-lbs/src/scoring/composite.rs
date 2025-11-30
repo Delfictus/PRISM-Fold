@@ -50,6 +50,17 @@ impl Default for DrugabilityClass {
     }
 }
 
+impl DrugabilityClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DrugabilityClass::HighlyDruggable => "Highly Druggable",
+            DrugabilityClass::Druggable => "Druggable",
+            DrugabilityClass::DifficultTarget => "Difficult Target",
+            DrugabilityClass::Undruggable => "Undruggable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Components {
     pub volume: f64,
