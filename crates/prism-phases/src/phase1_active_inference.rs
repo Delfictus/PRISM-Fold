@@ -364,6 +364,51 @@ impl Phase1ActiveInference {
             policy.mean_uncertainty()
         );
     }
+
+    /// Applies dendritic reservoir difficulty to policy for targeted exploration.
+    ///
+    /// Uses per-vertex difficulty from Phase 0 to modulate uncertainty:
+    /// - High difficulty vertices (> 0.7): Boost uncertainty by 1.3x
+    /// - Medium difficulty (0.3-0.7): Normal uncertainty
+    /// - Low difficulty (< 0.3): Slight reduction (0.9x)
+    ///
+    /// This implements the Phase 0 → Phase 1 coupling where neuromorphic
+    /// difficulty estimation guides Active Inference exploration.
+    fn apply_dendritic_difficulty(&self, policy: &mut ActiveInferencePolicy, difficulty: &[f32]) {
+        if difficulty.len() != policy.uncertainty.len() {
+            log::warn!(
+                "[Phase1] Dendritic difficulty length mismatch: {} vs {}",
+                difficulty.len(),
+                policy.uncertainty.len()
+            );
+            return;
+        }
+
+        let mut boosted = 0usize;
+        let mut reduced = 0usize;
+
+        for (i, &diff) in difficulty.iter().enumerate() {
+            let adjustment = if diff > 0.7 {
+                boosted += 1;
+                1.3 // High difficulty: boost exploration
+            } else if diff < 0.3 {
+                reduced += 1;
+                0.9 // Low difficulty: slight exploitation
+            } else {
+                1.0 // Normal
+            };
+
+            policy.uncertainty[i] *= adjustment;
+            policy.uncertainty[i] = policy.uncertainty[i].clamp(0.0, 1.0);
+        }
+
+        log::info!(
+            "[Phase1] Dendritic coupling: {} vertices boosted, {} reduced, mean_uncertainty={:.4}",
+            boosted,
+            reduced,
+            policy.mean_uncertainty()
+        );
+    }
 }
 
 impl Default for Phase1ActiveInference {
@@ -454,6 +499,18 @@ impl PhaseController for Phase1ActiveInference {
         // Apply geometry prediction error to policy if available
         if let Some(error) = geometry_prediction_error {
             self.apply_geometry_prediction_error(&mut policy, error);
+        }
+
+        // Apply dendritic reservoir difficulty from Phase 0
+        if let Some(difficulty) = context.dendritic_difficulty() {
+            log::info!(
+                "[Phase1] Dendritic metrics available: {} vertices, mean_difficulty={:.3}",
+                difficulty.len(),
+                context.mean_difficulty()
+            );
+            self.apply_dendritic_difficulty(&mut policy, difficulty);
+        } else {
+            log::debug!("[Phase1] No dendritic metrics available (Phase 0 may not have run)");
         }
 
         log::info!(

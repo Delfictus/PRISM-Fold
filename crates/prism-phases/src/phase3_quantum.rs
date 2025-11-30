@@ -482,6 +482,26 @@ impl PhaseController for Phase3Quantum {
  self.apply_rl_action_raw(action_idx);
  }
 
+ // Apply dendritic reservoir uncertainty for quantum tunneling modulation
+ // Higher mean uncertainty → higher coupling strength for more quantum exploration
+ if context.has_dendritic_metrics() {
+ let mean_uncert = context.mean_uncertainty();
+ // Scale coupling: low uncertainty (0.0) → 0.8x, high uncertainty (1.0) → 1.4x
+ let coupling_boost = 0.8 + mean_uncert * 0.6;
+
+ let original_coupling = self.coupling_strength;
+ self.coupling_strength *= coupling_boost;
+ self.coupling_strength = self.coupling_strength.clamp(0.5, 3.0);
+
+ log::info!(
+ "[Phase3] Dendritic coupling: mean_uncertainty={:.3}, coupling_boost={:.2}x, coupling: {:.2}→{:.2}",
+ mean_uncert,
+ coupling_boost,
+ original_coupling,
+ self.coupling_strength
+ );
+ }
+
  // Execute quantum evolution (GPU or CPU path)
  let solution = if self.gpu_enabled && self.quantum_gpu.is_some() {
  // GPU path: Direct call to extract_coloring_gpu (which calls evolve_and_measure)

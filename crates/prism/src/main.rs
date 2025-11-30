@@ -160,6 +160,18 @@ struct Args {
     #[arg(long, default_value = "1000")]
     gpu_nvml_interval: u64,
 
+    /// Enable AATGS async kernel scheduling
+    #[arg(long, default_value = "false")]
+    aatgs_async: bool,
+
+    /// Enable multi-GPU parallel execution (requires multiple --gpu-devices)
+    #[arg(long, default_value = "false")]
+    multi_gpu: bool,
+
+    /// Enable Ultra Kernel (fused 8-component GPU kernel)
+    #[arg(long, default_value = "false")]
+    ultra_kernel: bool,
+
     // ========================================================================
     // Phase 2 Hyperparameters (Thermodynamic Annealing)
     // ========================================================================

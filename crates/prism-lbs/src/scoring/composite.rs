@@ -1,6 +1,13 @@
 //! Composite druggability scoring
+//!
+//! GPU-accelerated batch scoring with optional FluxNet RL weight learning.
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "cuda")]
+use prism_gpu::{context::GpuContext, LbsGpu};
+#[cfg(feature = "cuda")]
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringWeights {
@@ -155,6 +162,111 @@ impl DruggabilityScorer {
             DrugabilityClass::DifficultTarget
         } else {
             DrugabilityClass::Undruggable
+        }
+    }
+
+    /// GPU-accelerated batch scoring for multiple pockets
+    #[cfg(feature = "cuda")]
+    pub fn score_batch_gpu(
+        &self,
+        pockets: &[crate::pocket::Pocket],
+        gpu_ctx: &GpuContext,
+    ) -> Result<Vec<DruggabilityScore>, crate::LbsError> {
+        if pockets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let n = pockets.len();
+
+        // Prepare component vectors
+        let volume: Vec<f32> = pockets.iter().map(|p| self.score_volume(p.volume) as f32).collect();
+        let hydro: Vec<f32> = pockets.iter().map(|p| self.score_hydrophobicity(p.mean_hydrophobicity) as f32).collect();
+        let enclosure: Vec<f32> = pockets.iter().map(|p| self.score_enclosure(p.enclosure_ratio) as f32).collect();
+        let depth: Vec<f32> = pockets.iter().map(|p| self.score_depth(p.mean_depth) as f32).collect();
+        let hbond: Vec<f32> = pockets.iter().map(|p| self.score_hbond(p.hbond_donors, p.hbond_acceptors) as f32).collect();
+        let flex: Vec<f32> = pockets.iter().map(|p| self.score_flexibility(p.mean_flexibility) as f32).collect();
+        let cons: Vec<f32> = pockets.iter().map(|p| self.score_conservation(p.mean_conservation) as f32).collect();
+        let topo: Vec<f32> = pockets.iter().map(|p| p.persistence_score as f32).collect();
+
+        let weights: [f32; 8] = [
+            self.weights.volume as f32,
+            self.weights.hydrophobicity as f32,
+            self.weights.enclosure as f32,
+            self.weights.depth as f32,
+            self.weights.hbond_capacity as f32,
+            self.weights.flexibility as f32,
+            self.weights.conservation as f32,
+            self.weights.topology as f32,
+        ];
+
+        let lbs_gpu = LbsGpu::new(gpu_ctx.device().clone(), &gpu_ctx.ptx_dir())
+            .map_err(|e| crate::LbsError::Gpu(format!("Failed to init LbsGpu: {}", e)))?;
+
+        let gpu_scores = lbs_gpu.druggability_score(
+            &volume, &hydro, &enclosure, &depth, &hbond, &flex, &cons, &topo, weights
+        ).map_err(|e| crate::LbsError::Gpu(format!("GPU scoring failed: {}", e)))?;
+
+        // Assemble results with components
+        let mut results = Vec::with_capacity(n);
+        for (i, &total) in gpu_scores.iter().enumerate() {
+            results.push(DruggabilityScore {
+                total: total as f64,
+                classification: self.classify(total as f64),
+                components: Components {
+                    volume: volume[i] as f64,
+                    hydro: hydro[i] as f64,
+                    enclosure: enclosure[i] as f64,
+                    depth: depth[i] as f64,
+                    hbond: hbond[i] as f64,
+                    flex: flex[i] as f64,
+                    cons: cons[i] as f64,
+                    topo: topo[i] as f64,
+                },
+            });
+        }
+
+        Ok(results)
+    }
+
+    /// Get weights as array for RL optimization
+    pub fn weights_as_array(&self) -> [f64; 8] {
+        [
+            self.weights.volume,
+            self.weights.hydrophobicity,
+            self.weights.enclosure,
+            self.weights.depth,
+            self.weights.hbond_capacity,
+            self.weights.flexibility,
+            self.weights.conservation,
+            self.weights.topology,
+        ]
+    }
+
+    /// Update weights from array (for RL optimization)
+    pub fn update_weights(&mut self, new_weights: [f64; 8]) {
+        self.weights.volume = new_weights[0].clamp(0.0, 1.0);
+        self.weights.hydrophobicity = new_weights[1].clamp(0.0, 1.0);
+        self.weights.enclosure = new_weights[2].clamp(0.0, 1.0);
+        self.weights.depth = new_weights[3].clamp(0.0, 1.0);
+        self.weights.hbond_capacity = new_weights[4].clamp(0.0, 1.0);
+        self.weights.flexibility = new_weights[5].clamp(0.0, 1.0);
+        self.weights.conservation = new_weights[6].clamp(0.0, 1.0);
+        self.weights.topology = new_weights[7].clamp(0.0, 1.0);
+
+        // Normalize to sum to 1.0
+        let sum: f64 = self.weights.volume + self.weights.hydrophobicity +
+            self.weights.enclosure + self.weights.depth + self.weights.hbond_capacity +
+            self.weights.flexibility + self.weights.conservation + self.weights.topology;
+
+        if sum > 0.0 {
+            self.weights.volume /= sum;
+            self.weights.hydrophobicity /= sum;
+            self.weights.enclosure /= sum;
+            self.weights.depth /= sum;
+            self.weights.hbond_capacity /= sum;
+            self.weights.flexibility /= sum;
+            self.weights.conservation /= sum;
+            self.weights.topology /= sum;
         }
     }
 }

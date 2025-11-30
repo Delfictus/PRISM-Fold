@@ -887,6 +887,33 @@ impl PipelineOrchestrator {
  }
  }
 
+ // =========================================================================
+ // AATGS ASYNC SCHEDULER INITIALIZATION
+ // =========================================================================
+ #[cfg(feature = "cuda")]
+ {
+ if self.use_aatgs_async && self.gpu_exec_context.is_none() {
+ if let Err(e) = self.initialize_aatgs() {
+ log::warn!("AATGS initialization failed: {}. Continuing with sync execution.", e);
+ }
+ }
+
+ if self.gpu_exec_context.is_some() {
+ log::info!("=== AATGS ASYNC SCHEDULER: Enabled for kernel fusion ===");
+ }
+ }
+
+ // =========================================================================
+ // MULTI-GPU STATUS LOGGING
+ // =========================================================================
+ // Multi-GPU is initialized explicitly via initialize_multi_gpu() when:
+ // - Config specifies multiple device IDs, or
+ // - CLI explicitly requests multi-GPU mode
+ #[cfg(feature = "cuda")]
+ if self.multi_gpu_context.is_some() {
+ log::info!("=== MULTI-GPU CONTEXT: Active with parallel execution ===");
+ }
+
  // Initialize phases AFTER GPU context is set up
  // This ensures GPU-accelerated phases receive CUDA device handles
  if self.phases.is_empty() {

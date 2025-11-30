@@ -145,6 +145,31 @@ impl PipelineBridge {
         // Create orchestrator
         let mut orchestrator = PipelineOrchestrator::new(pipeline_config, rl_controller);
 
+        // Configure high-performance GPU modes
+        #[cfg(feature = "cuda")]
+        {
+            // Enable AATGS async scheduling if requested
+            if config.enable_aatgs_async {
+                orchestrator.enable_aatgs_async(true);
+                log::info!("AATGS async scheduling enabled via config");
+            }
+
+            // Enable Ultra Kernel if requested
+            if config.enable_ultra_kernel {
+                orchestrator.enable_ultra_kernel(true);
+                log::info!("Ultra Kernel mode enabled via config");
+            }
+
+            // Initialize multi-GPU if requested and multiple devices specified
+            if config.enable_multi_gpu && config.gpu_device_ids.len() > 1 {
+                if let Err(e) = orchestrator.initialize_multi_gpu(&config.gpu_device_ids) {
+                    log::warn!("Multi-GPU initialization failed: {}. Using single GPU.", e);
+                } else {
+                    log::info!("Multi-GPU enabled with {} devices", config.gpu_device_ids.len());
+                }
+            }
+        }
+
         // Create progress callback bridge
         let callback = ProgressCallbackBridge::new(
             self.state.clone(),

@@ -490,6 +490,23 @@ impl PhaseController for Phase4Geodesic {
  }
  }
 
+ // Apply dendritic reservoir difficulty to boost centrality of hard vertices
+ // High difficulty vertices are prioritized for anchor selection
+ if context.has_dendritic_metrics() {
+ let mean_diff = context.mean_difficulty() as f64;
+ for i in 0..n {
+ let vertex_diff = context.vertex_difficulty(i) as f64;
+ // Boost factor: 1.0 for average difficulty, up to 1.5 for high difficulty
+ let boost = 1.0 + (vertex_diff - mean_diff).max(0.0) * 0.5;
+ vertex_centrality[i] *= boost;
+ }
+ log::info!(
+ "[Phase4] Dendritic coupling: mean_difficulty={:.3}, centrality boosted for {} high-difficulty vertices",
+ mean_diff,
+ (0..n).filter(|&i| context.vertex_difficulty(i) as f64 > mean_diff).count()
+ );
+ }
+
  // Select structural anchors (for warmstart system)
  let anchors = select_structural_anchors(&vertex_centrality, self.anchor_fraction);
 

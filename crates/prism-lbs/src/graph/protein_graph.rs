@@ -26,7 +26,7 @@ impl Default for GraphConfig {
             surface_only: true,
             min_sasa: 0.5,
             weighted_edges: true,
-            use_gpu: false,
+            use_gpu: true,  // GPU-first: always prefer GPU acceleration
         }
     }
 }

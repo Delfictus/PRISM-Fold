@@ -86,6 +86,10 @@ path = "src/bin/main.rs"
 name = "prism-lbs-benchmark"
 path = "src/bin/benchmark.rs"
 
+[[bin]]
+name = "prism-lbs-train"
+path = "src/bin/train.rs"
+
 [[bench]]
 name = "lbs_benchmarks"
 harness = false

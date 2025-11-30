@@ -2,6 +2,13 @@
 //!
 //! Reframes binding site prediction as a graph coloring optimization problem
 //! leveraging PRISM's quantum-neuromorphic-GPU architecture.
+//!
+//! ## Features
+//! - GPU-accelerated pocket detection (4 CUDA kernels)
+//! - FluxNet RL for druggability weight optimization
+//! - GNN embeddings for enhanced pocket features
+//! - Ensemble prediction with multi-method voting
+//! - PDBBind training integration
 
 pub mod features;
 pub mod graph;
@@ -11,6 +18,7 @@ pub mod pipeline_integration;
 pub mod pocket;
 pub mod scoring;
 pub mod structure;
+pub mod training;
 pub mod validation;
 
 // Re-exports
@@ -218,9 +226,34 @@ impl PrismLbs {
         // 3. Run pocket detection through phases
         let mut pockets = self.detector.detect(&graph)?;
 
-        // 4. Score pockets
-        for pocket in &mut pockets {
-            pocket.druggability_score = self.scorer.score(pocket);
+        // 4. Score pockets (GPU when available)
+        #[cfg(feature = "cuda")]
+        {
+            if let Some(ctx) = &self.gpu_ctx {
+                match self.scorer.score_batch_gpu(&pockets, ctx) {
+                    Ok(scores) => {
+                        for (pocket, score) in pockets.iter_mut().zip(scores) {
+                            pocket.druggability_score = score;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("GPU batch scoring failed, falling back to CPU: {}", e);
+                        for pocket in &mut pockets {
+                            pocket.druggability_score = self.scorer.score(pocket);
+                        }
+                    }
+                }
+            } else {
+                for pocket in &mut pockets {
+                    pocket.druggability_score = self.scorer.score(pocket);
+                }
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            for pocket in &mut pockets {
+                pocket.druggability_score = self.scorer.score(pocket);
+            }
         }
 
         // 5. Sort by druggability score
@@ -269,6 +302,15 @@ pub enum LbsError {
 
     #[error("Configuration error: {0}")]
     Config(String),
+
+    #[error("Training error: {0}")]
+    Training(String),
+}
+
+impl From<anyhow::Error> for LbsError {
+    fn from(err: anyhow::Error) -> Self {
+        LbsError::Training(err.to_string())
+    }
 }
 
 #[cfg(test)]

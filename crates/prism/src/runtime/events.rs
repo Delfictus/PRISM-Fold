@@ -206,6 +206,75 @@ pub enum PrismEvent {
     },
 
     // ═══════════════════════════════════════════════════════════════════
+    // LBS Events (Biomolecular Mode)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Protein structure loaded
+    ProteinLoaded {
+        pdb_id: String,
+        residues: usize,
+        atoms: usize,
+        chains: usize,
+    },
+
+    /// LBS phase started
+    LbsPhaseStarted {
+        phase: LbsPhaseId,
+        name: String,
+    },
+
+    /// LBS phase progress
+    LbsPhaseProgress {
+        phase: LbsPhaseId,
+        iteration: usize,
+        max_iterations: usize,
+        pockets_found: usize,
+        best_druggability: f32,
+    },
+
+    /// LBS phase completed
+    LbsPhaseCompleted {
+        phase: LbsPhaseId,
+        duration_ms: u64,
+        pockets_found: usize,
+    },
+
+    /// Pocket detected
+    PocketDetected {
+        pocket_id: usize,
+        volume: f32,
+        druggability: f32,
+        center: [f32; 3],
+        residue_count: usize,
+    },
+
+    /// LBS prediction complete
+    LbsPredictionComplete {
+        total_pockets: usize,
+        best_pocket_druggability: f32,
+        total_duration_ms: u64,
+        gpu_accelerated: bool,
+    },
+
+    /// GNN inference event
+    GnnInference {
+        num_nodes: usize,
+        num_edges: usize,
+        chromatic_prediction: usize,
+        confidence: f32,
+        gpu_used: bool,
+        latency_ms: u64,
+    },
+
+    /// SASA computation event
+    SasaComputed {
+        num_atoms: usize,
+        exposed_area: f32,
+        buried_area: f32,
+        latency_ms: u64,
+    },
+
+    // ═══════════════════════════════════════════════════════════════════
     // System Events
     // ═══════════════════════════════════════════════════════════════════
 
@@ -261,6 +330,32 @@ impl PhaseId {
     }
 }
 
+/// LBS Phase identifier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LbsPhaseId {
+    Phase0Surface,
+    Phase1Beliefs,
+    Phase2Sampling,
+    Phase3Quantum,
+    Phase4Cavity,
+    Phase6Topology,
+    WhcrRefinement,
+}
+
+impl LbsPhaseId {
+    pub fn name(&self) -> &'static str {
+        match self {
+            LbsPhaseId::Phase0Surface => "Surface Reservoir",
+            LbsPhaseId::Phase1Beliefs => "Pocket Beliefs",
+            LbsPhaseId::Phase2Sampling => "MCMC Sampling",
+            LbsPhaseId::Phase3Quantum => "Quantum Exploration",
+            LbsPhaseId::Phase4Cavity => "Cavity Analysis",
+            LbsPhaseId::Phase6Topology => "TDA Topology",
+            LbsPhaseId::WhcrRefinement => "WHCR Refinement",
+        }
+    }
+}
+
 /// Optimization configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
@@ -269,6 +364,14 @@ pub struct OptimizationConfig {
     pub enable_warmstart: bool,
     pub enable_fluxnet: bool,
     pub phases_enabled: Vec<PhaseId>,
+    /// Enable AATGS async kernel scheduling
+    pub enable_aatgs_async: bool,
+    /// Enable multi-GPU parallel execution
+    pub enable_multi_gpu: bool,
+    /// Enable Ultra Kernel (fused 8-component GPU kernel)
+    pub enable_ultra_kernel: bool,
+    /// GPU device IDs for multi-GPU mode
+    pub gpu_device_ids: Vec<usize>,
 }
 
 impl Default for OptimizationConfig {
@@ -287,6 +390,10 @@ impl Default for OptimizationConfig {
                 PhaseId::Phase6Tda,
                 PhaseId::Phase7Ensemble,
             ],
+            enable_aatgs_async: false,
+            enable_multi_gpu: false,
+            enable_ultra_kernel: false,
+            gpu_device_ids: vec![0],
         }
     }
 }

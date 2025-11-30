@@ -234,6 +234,25 @@ impl PhaseController for Phase2Thermodynamic {
  self.apply_rl_action_raw(action_idx);
  }
 
+ // Apply dendritic reservoir difficulty for temperature adjustment
+ // Higher mean difficulty → higher starting temperature for better exploration
+ if context.has_dendritic_metrics() {
+ let mean_diff = context.mean_difficulty();
+ let temp_boost = 1.0 + (mean_diff - 0.5) * 0.5; // Range: 0.75x to 1.25x
+
+ let original_max = self.temp_max;
+ self.temp_max *= temp_boost;
+ self.temp_max = self.temp_max.clamp(5.0, 50.0);
+
+ log::info!(
+ "[Phase2] Dendritic coupling: mean_difficulty={:.3}, temp_boost={:.2}x, temp_max: {:.2}→{:.2}",
+ mean_diff,
+ temp_boost,
+ original_max,
+ self.temp_max
+ );
+ }
+
  // Get initial coloring from context or warmstart
  let initial_colors = if let Some(sol) = &context.best_solution {
  log::info!(

@@ -20,6 +20,19 @@ pub struct Pocket {
     pub hbond_acceptors: usize,
     pub druggability_score: DruggabilityScore,
     pub boundary_atoms: Vec<usize>,
+
+    // Enhanced features
+    /// Mean electrostatic potential (from partial charges)
+    #[serde(default)]
+    pub mean_electrostatic: f64,
+
+    /// GNN-derived embedding vector (optional)
+    #[serde(default)]
+    pub gnn_embedding: Vec<f64>,
+
+    /// GNN-based druggability contribution
+    #[serde(default)]
+    pub gnn_druggability: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

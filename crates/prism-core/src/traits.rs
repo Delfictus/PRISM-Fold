@@ -257,6 +257,80 @@ impl PhaseContext {
  .unwrap_or(false)
  }
 
+ // === Dendritic Reservoir Metrics (Phase 0 → Phases 1-7 Coupling) ===
+
+ /// Returns per-vertex difficulty metrics from Phase 0 dendritic reservoir.
+ ///
+ /// High difficulty vertices (close to 1.0) are hard to color and need
+ /// more computational effort. Downstream phases use this for:
+ /// - Phase 1: Increase prediction error tolerance
+ /// - Phase 2: Start at higher temperature
+ /// - Phase 4: Weight geodesic distance computation
+ /// - Phase 7: Focus local search on difficult regions
+ pub fn dendritic_difficulty(&self) -> Option<&Vec<f32>> {
+ self.scratch
+ .get("phase0_difficulty")
+ .and_then(|v| v.downcast_ref::<Vec<f32>>())
+ }
+
+ /// Returns per-vertex uncertainty metrics from Phase 0 dendritic reservoir.
+ ///
+ /// High uncertainty vertices (close to 1.0) have unpredictable neighborhood
+ /// structure. Downstream phases use this for:
+ /// - Phase 3: Increase quantum tunneling probability
+ /// - Phase 6: Adjust persistence thresholds in TDA
+ pub fn dendritic_uncertainty(&self) -> Option<&Vec<f32>> {
+ self.scratch
+ .get("phase0_uncertainty")
+ .and_then(|v| v.downcast_ref::<Vec<f32>>())
+ }
+
+ /// Returns Phase 0 telemetry summary (mean/variance/entropy stats).
+ pub fn dendritic_telemetry(&self) -> Option<&crate::types::Phase0Telemetry> {
+ self.scratch
+ .get("phase0_telemetry")
+ .and_then(|v| v.downcast_ref::<crate::types::Phase0Telemetry>())
+ }
+
+ /// Returns mean difficulty across all vertices (0.5 if not computed).
+ ///
+ /// Quick access for phases that don't need per-vertex granularity.
+ pub fn mean_difficulty(&self) -> f32 {
+ self.dendritic_telemetry()
+ .map(|t| t.difficulty_mean)
+ .unwrap_or(0.5)
+ }
+
+ /// Returns mean uncertainty across all vertices (0.5 if not computed).
+ ///
+ /// Quick access for phases that don't need per-vertex granularity.
+ pub fn mean_uncertainty(&self) -> f32 {
+ self.dendritic_telemetry()
+ .map(|t| t.uncertainty_mean)
+ .unwrap_or(0.5)
+ }
+
+ /// Returns difficulty for a specific vertex (0.5 default if not available).
+ pub fn vertex_difficulty(&self, vertex: usize) -> f32 {
+ self.dendritic_difficulty()
+ .and_then(|d| d.get(vertex))
+ .copied()
+ .unwrap_or(0.5)
+ }
+
+ /// Returns uncertainty for a specific vertex (0.5 default if not available).
+ pub fn vertex_uncertainty(&self, vertex: usize) -> f32 {
+ self.dendritic_uncertainty()
+ .and_then(|u| u.get(vertex))
+ .copied()
+ .unwrap_or(0.5)
+ }
+
+ /// Checks if dendritic reservoir metrics are available.
+ pub fn has_dendritic_metrics(&self) -> bool {
+ self.scratch.contains_key("phase0_difficulty")
+ }
+
  /// Sets the WHCR pending flag, allowing conflicted solutions to bypass checkpoint.
  pub fn set_whcr_pending(&mut self, pending: bool) {
  self.whcr_pending = pending;

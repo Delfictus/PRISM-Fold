@@ -534,6 +534,28 @@ impl PhaseController for Phase6TDA {
  }
  }
 
+ // Apply dendritic reservoir uncertainty for persistence threshold scaling
+ // Higher mean uncertainty → stricter persistence filtering (fewer features)
+ let persistence_scale = if context.has_dendritic_metrics() {
+ let mean_uncert = context.mean_uncertainty();
+ // Scale: low uncertainty → 0.8x threshold (more features)
+ // high uncertainty → 1.3x threshold (stricter filtering)
+ let scale = 0.8 + mean_uncert * 0.5;
+ log::info!(
+ "[Phase6] Dendritic coupling: mean_uncertainty={:.3}, persistence_scale={:.2}x",
+ mean_uncert,
+ scale
+ );
+ scale
+ } else {
+ 1.0
+ };
+ // Store persistence scale in context for use by Betti computation
+ context.scratch.insert(
+ "tda_persistence_scale".to_string(),
+ Box::new(persistence_scale as f32)
+ );
+
  // Compute Betti numbers
  self.compute_betti_numbers(graph)?;
 

@@ -319,6 +319,22 @@ impl PhaseController for Phase7Ensemble {
             }
         }
 
+        // Apply dendritic reservoir difficulty for ensemble diversity tuning
+        // High difficulty graphs benefit from more diverse exploration
+        if context.has_dendritic_metrics() {
+            let mean_diff = context.mean_difficulty();
+            // Scale diversity: low difficulty → 0.9x, high difficulty → 1.4x
+            let diversity_boost = 0.9 + mean_diff * 0.5;
+            adjusted_diversity *= diversity_boost;
+            adjusted_diversity = adjusted_diversity.clamp(0.1, 2.0);
+            log::info!(
+                "[Phase7] Dendritic coupling: mean_difficulty={:.3}, diversity_boost={:.2}x, final_diversity={:.3}",
+                mean_diff,
+                diversity_boost,
+                adjusted_diversity
+            );
+        }
+
         // Compute diversity and consensus
         self.compute_diversity(&candidates);
         self.compute_consensus(&candidates);

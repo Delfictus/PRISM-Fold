@@ -274,6 +274,10 @@ impl PocketDetector {
                     hbond_acceptors: acceptors,
                     druggability_score: DruggabilityScore::default(),
                     boundary_atoms: pocket_boundary_atoms,
+                    // Enhanced features (computed later or default)
+                    mean_electrostatic: 0.0,
+                    gnn_embedding: Vec::new(),
+                    gnn_druggability: 0.0,
                 }
             })
             .collect()
