@@ -20,6 +20,7 @@ prism-whcr = { workspace = true }
 ndarray = "0.15"
 ndarray-rand = "0.14"
 nalgebra = "0.32"
+rand = "0.8"
 num-traits = "0.2"
 statrs = "0.16"
 
@@ -71,6 +72,8 @@ tempfile = "3.8"
 [features]
 default = ["cuda"]
 cuda = ["cudarc", "prism-gpu/cuda"]
+voronoi = []
+fpocket = []  # Enable fpocket external binary integration (requires fpocket installation)
 profile = ["dep:pprof"]
 python-bindings = ["pyo3"]
 

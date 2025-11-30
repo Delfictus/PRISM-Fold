@@ -6,6 +6,8 @@ use crate::phases::{
     PocketRefinementConfig, PocketRefinementPhase, PocketSamplingConfig, PocketSamplingPhase,
     SurfaceReservoirConfig, SurfaceReservoirPhase, TopologicalPocketConfig, TopologicalPocketPhase,
 };
+use crate::pocket::cavity_detector::{CavityDetector, CavityDetectorConfig};
+use crate::pocket::voronoi_detector::{VoronoiDetector, VoronoiDetectorConfig};
 use crate::pocket::geometry::{
     alpha_shape_volume, boundary_enclosure, bounding_box_volume, convex_hull_volume,
     enclosure_ratio, voxel_volume,
@@ -24,6 +26,18 @@ pub struct PocketDetectorConfig {
     pub topology: TopologicalPocketConfig,
     pub refinement: PocketRefinementConfig,
     pub geometry: crate::pocket::GeometryConfig,
+    /// Use fpocket for gold-standard pocket detection (requires fpocket installation)
+    pub use_fpocket: bool,
+    /// fpocket configuration
+    pub fpocket: crate::pocket::fpocket_ffi::FpocketConfig,
+    /// Use Voronoi-based detection (RECOMMENDED - proper Delaunay triangulation)
+    pub use_voronoi_detection: bool,
+    /// Configuration for Voronoi-based detection
+    pub voronoi_detector: VoronoiDetectorConfig,
+    /// Use grid-based alpha sphere cavity detection (legacy, less accurate)
+    pub use_cavity_detection: bool,
+    /// Configuration for grid-based alpha sphere cavity detection
+    pub cavity_detector: CavityDetectorConfig,
 }
 
 impl Default for PocketDetectorConfig {
@@ -37,6 +51,12 @@ impl Default for PocketDetectorConfig {
             topology: TopologicalPocketConfig::default(),
             refinement: PocketRefinementConfig::default(),
             geometry: crate::pocket::GeometryConfig::default(),
+            use_fpocket: false,  // Disabled by default (requires fpocket installation)
+            fpocket: crate::pocket::fpocket_ffi::FpocketConfig::default(),
+            use_voronoi_detection: true,  // RECOMMENDED: proper Delaunay-based detection
+            voronoi_detector: VoronoiDetectorConfig::default(),
+            use_cavity_detection: false,  // Legacy grid-based method
+            cavity_detector: CavityDetectorConfig::default(),
         }
     }
 }
@@ -58,11 +78,61 @@ impl PocketDetector {
                 topology: config.phase6.clone(),
                 refinement: PocketRefinementConfig::default(),
                 geometry: config.geometry.clone(),
+                use_fpocket: false,  // Disabled by default (requires fpocket installation)
+                fpocket: crate::pocket::fpocket_ffi::FpocketConfig::default(),
+                use_voronoi_detection: true,  // RECOMMENDED: proper Delaunay-based detection
+                voronoi_detector: VoronoiDetectorConfig::default(),
+                use_cavity_detection: false,  // Legacy grid-based method
+                cavity_detector: CavityDetectorConfig::default(),
             },
         })
     }
 
     pub fn detect(&self, graph: &ProteinGraph) -> Result<Vec<Pocket>, LbsError> {
+        // Priority 1: Use fpocket if enabled and available (gold standard)
+        if self.config.use_fpocket {
+            if crate::pocket::fpocket_ffi::fpocket_available() {
+                log::info!("Using fpocket for gold-standard pocket detection");
+
+                // fpocket requires a PDB file path, check if we have it from graph
+                if let Some(pdb_path) = graph.structure_ref.pdb_path.as_ref() {
+                    match crate::pocket::fpocket_ffi::run_fpocket(pdb_path, &self.config.fpocket) {
+                        Ok(pockets) => {
+                            log::info!("fpocket detected {} pockets", pockets.len());
+                            return Ok(pockets.into_iter().take(self.config.max_pockets).collect());
+                        }
+                        Err(e) => {
+                            log::warn!("fpocket execution failed: {}. Falling back to internal detection.", e);
+                        }
+                    }
+                } else {
+                    log::warn!("fpocket enabled but no PDB file path available. Use ProteinStructure::from_pdb_file() to enable fpocket.");
+                }
+            } else {
+                log::warn!("fpocket enabled but not found in PATH. Install fpocket or disable use_fpocket.");
+            }
+        }
+
+        // Priority 2: Use Voronoi-based detection (RECOMMENDED - proper alpha sphere method)
+        if self.config.use_voronoi_detection {
+            log::info!("Using Voronoi-based pocket detection (alpha sphere method)");
+            let voronoi_detector = VoronoiDetector::new(self.config.voronoi_detector.clone());
+            let pockets = voronoi_detector.detect(graph);
+            log::info!("Voronoi detection found {} pockets", pockets.len());
+            return Ok(pockets.into_iter().take(self.config.max_pockets).collect());
+        }
+
+        // Priority 3: Use grid-based alpha sphere cavity detection (legacy, less accurate)
+        if self.config.use_cavity_detection {
+            log::info!("Using grid-based alpha sphere cavity detection (legacy method)");
+            let cavity_detector = CavityDetector::new(self.config.cavity_detector.clone());
+            let pockets = cavity_detector.detect(graph);
+            log::info!("Grid-based cavity detection found {} pockets", pockets.len());
+            return Ok(pockets.into_iter().take(self.config.max_pockets).collect());
+        }
+
+        // Priority 4: Fallback to original belief propagation / graph coloring approach
+        log::info!("Using belief propagation pocket detection (legacy mode)");
         let reservoir_phase = SurfaceReservoirPhase::new(self.config.reservoir.clone());
         let reservoir_output = reservoir_phase.execute(graph);
 
