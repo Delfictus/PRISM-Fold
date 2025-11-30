@@ -9,7 +9,9 @@
 //! - GNN embeddings for enhanced pocket features
 //! - Ensemble prediction with multi-method voting
 //! - PDBBind training integration
+//! - World-class allosteric site detection (4-stage pipeline)
 
+pub mod allosteric;
 pub mod features;
 pub mod graph;
 pub mod output;
@@ -24,6 +26,11 @@ pub mod unified;
 pub mod validation;
 
 // Re-exports
+pub use allosteric::{
+    AllostericDetectionConfig, AllostericDetectionOutput, AllostericDetector, AllostericPocket,
+    AllostericDetectionType, ConfidenceAssessment, CoverageGap, Domain, DomainInterface,
+    HingeRegion, MultiModuleEvidence,
+};
 pub use graph::{GraphConfig, ProteinGraph, ProteinGraphBuilder};
 pub use pocket::{Pocket, PocketDetector, PocketProperties};
 pub use scoring::{DrugabilityClass, DruggabilityScore, DruggabilityScorer};

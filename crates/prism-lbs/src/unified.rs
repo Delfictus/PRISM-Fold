@@ -3,6 +3,7 @@
 //! This module orchestrates both detection methods and produces a single,
 //! merged output with detection type annotations.
 
+use crate::allosteric::{AllostericDetector, AllostericDetectionConfig, AllostericPocket};
 use crate::graph::ProteinGraph;
 use crate::pocket::{Pocket, PocketDetector, PocketDetectorConfig};
 use crate::softspot::{
@@ -23,6 +24,9 @@ pub struct UnifiedDetectorConfig {
     /// Enable soft-spot (cryptic) detection
     pub enable_softspot: bool,
 
+    /// Enable allosteric site detection (world-class 4-stage pipeline)
+    pub enable_allosteric: bool,
+
     /// Use enhanced multi-signal detection (NMA, Contact Order, Conservation, Probes)
     /// This is ADDITIVE - it can only improve detection, never reduce scores
     pub use_enhanced_detection: bool,
@@ -40,6 +44,7 @@ impl Default for UnifiedDetectorConfig {
         Self {
             enable_geometric: true,
             enable_softspot: true,
+            enable_allosteric: true, // Allosteric detection ON by default
             use_enhanced_detection: true, // Enhanced detection ON by default
             max_pockets: 20,
             consensus_overlap_threshold: 0.3,
@@ -55,7 +60,9 @@ pub enum DetectionType {
     Geometric,
     /// Detected by soft-spot analysis (cryptic site)
     Cryptic,
-    /// Detected by both methods (high confidence)
+    /// Detected by allosteric network analysis
+    Allosteric,
+    /// Detected by multiple methods (high confidence)
     Consensus,
 }
 
@@ -107,6 +114,19 @@ pub struct Evidence {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_score: Option<f64>,
 
+    // Allosteric network signals (Stage 3)
+    /// Allosteric coupling strength to active site
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allosteric_coupling: Option<f64>,
+
+    /// Betweenness centrality (communication hub score)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub betweenness_centrality: Option<f64>,
+
+    /// Shortest path length to active site
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_to_active_site: Option<f64>,
+
     /// Which detectors identified this pocket
     pub detected_by: Vec<String>,
 }
@@ -151,7 +171,10 @@ pub struct UnifiedSummary {
     /// Pockets from cryptic detection only
     pub cryptic: usize,
 
-    /// Pockets detected by both methods
+    /// Pockets from allosteric network analysis only
+    pub allosteric: usize,
+
+    /// Pockets detected by multiple methods
     pub consensus: usize,
 }
 
@@ -168,12 +191,13 @@ pub struct UnifiedOutput {
     pub summary: UnifiedSummary,
 }
 
-/// Unified detector combining geometric and soft-spot detection
+/// Unified detector combining geometric, soft-spot, and allosteric detection
 pub struct UnifiedDetector {
     pub config: UnifiedDetectorConfig,
     geometric_config: PocketDetectorConfig,
     softspot: SoftSpotDetector,
     enhanced_softspot: EnhancedSoftSpotDetector,
+    allosteric_detector: AllostericDetector,
 }
 
 impl Default for UnifiedDetector {
@@ -183,6 +207,7 @@ impl Default for UnifiedDetector {
             geometric_config: PocketDetectorConfig::default(),
             softspot: SoftSpotDetector::new(),
             enhanced_softspot: EnhancedSoftSpotDetector::new(),
+            allosteric_detector: AllostericDetector::default(),
         }
     }
 }
@@ -200,6 +225,7 @@ impl UnifiedDetector {
             geometric_config: PocketDetectorConfig::default(),
             softspot: SoftSpotDetector::new(),
             enhanced_softspot: EnhancedSoftSpotDetector::new(),
+            allosteric_detector: AllostericDetector::default(),
         }
     }
 
@@ -213,6 +239,21 @@ impl UnifiedDetector {
             geometric_config: PocketDetectorConfig::default(),
             softspot: SoftSpotDetector::new(),
             enhanced_softspot: EnhancedSoftSpotDetector::with_config(enhanced_config),
+            allosteric_detector: AllostericDetector::default(),
+        }
+    }
+
+    /// Create a unified detector with custom allosteric configuration
+    pub fn with_allosteric_config(
+        config: UnifiedDetectorConfig,
+        allosteric_config: AllostericDetectionConfig,
+    ) -> Self {
+        Self {
+            config,
+            geometric_config: PocketDetectorConfig::default(),
+            softspot: SoftSpotDetector::new(),
+            enhanced_softspot: EnhancedSoftSpotDetector::new(),
+            allosteric_detector: AllostericDetector::new(allosteric_config),
         }
     }
 
@@ -226,13 +267,15 @@ impl UnifiedDetector {
     /// Unified output combining all detected pockets
     pub fn detect(&self, graph: &ProteinGraph, structure_name: &str) -> Result<UnifiedOutput, LbsError> {
         log::info!(
-            "[UNIFIED] Starting unified detection for {} (enhanced={})",
+            "[UNIFIED] Starting unified detection for {} (enhanced={}, allosteric={})",
             structure_name,
-            self.config.use_enhanced_detection
+            self.config.use_enhanced_detection,
+            self.config.enable_allosteric
         );
 
         let mut geometric_pockets = Vec::new();
         let mut cryptic_candidates = Vec::new();
+        let mut allosteric_pockets: Vec<AllostericPocket> = Vec::new();
 
         // Run geometric detection
         if self.config.enable_geometric {
@@ -265,8 +308,28 @@ impl UnifiedDetector {
             }
         }
 
-        // Merge results
-        let unified = self.merge_results(&geometric_pockets, &cryptic_candidates, graph);
+        // Run allosteric detection (world-class 4-stage pipeline)
+        if self.config.enable_allosteric {
+            let allosteric_output = self.allosteric_detector.detect(
+                &graph.structure_ref.atoms,
+                structure_name
+            );
+            allosteric_pockets = allosteric_output.pockets;
+            log::info!(
+                "[UNIFIED] Allosteric detection: {} pockets ({} high, {} medium confidence)",
+                allosteric_pockets.len(),
+                allosteric_output.summary.by_confidence.get("high").unwrap_or(&0),
+                allosteric_output.summary.by_confidence.get("medium").unwrap_or(&0),
+            );
+        }
+
+        // Merge results (including allosteric pockets)
+        let unified = self.merge_results_with_allosteric(
+            &geometric_pockets,
+            &cryptic_candidates,
+            &allosteric_pockets,
+            graph
+        );
 
         // Build summary
         let summary = UnifiedSummary {
@@ -279,6 +342,10 @@ impl UnifiedDetector {
                 .iter()
                 .filter(|p| p.detection_type == DetectionType::Cryptic)
                 .count(),
+            allosteric: unified
+                .iter()
+                .filter(|p| p.detection_type == DetectionType::Allosteric)
+                .count(),
             consensus: unified
                 .iter()
                 .filter(|p| p.detection_type == DetectionType::Consensus)
@@ -286,10 +353,11 @@ impl UnifiedDetector {
         };
 
         log::info!(
-            "[UNIFIED] Final: {} total ({} geometric, {} cryptic, {} consensus)",
+            "[UNIFIED] Final: {} total ({} geometric, {} cryptic, {} allosteric, {} consensus)",
             summary.total_pockets,
             summary.geometric,
             summary.cryptic,
+            summary.allosteric,
             summary.consensus
         );
 
@@ -333,6 +401,7 @@ impl UnifiedDetector {
             total_pockets: unified.len(),
             geometric: 0,
             cryptic: unified.len(),
+            allosteric: 0,
             consensus: 0,
         };
 
@@ -381,6 +450,9 @@ impl UnifiedDetector {
                     contact_order: None,
                     conservation: None,
                     probe_score: None,
+                    allosteric_coupling: None,
+                    betweenness_centrality: None,
+                    path_to_active_site: None,
                     detected_by: vec!["geometric".into()],
                 },
             };
@@ -431,6 +503,160 @@ impl UnifiedDetector {
         unified
     }
 
+    /// Merge geometric pockets, cryptic candidates, and allosteric pockets
+    fn merge_results_with_allosteric(
+        &self,
+        geometric: &[Pocket],
+        cryptic: &[CrypticCandidate],
+        allosteric: &[AllostericPocket],
+        graph: &ProteinGraph,
+    ) -> Vec<UnifiedPocket> {
+        let mut unified = Vec::new();
+        let mut cryptic_used = vec![false; cryptic.len()];
+        let mut allosteric_used = vec![false; allosteric.len()];
+
+        // Process geometric pockets first
+        for gp in geometric {
+            let geo_residues: Vec<i32> = gp
+                .residue_indices
+                .iter()
+                .filter_map(|&idx| {
+                    graph.structure_ref.residues.get(idx).map(|r| r.seq_number)
+                })
+                .collect();
+
+            let mut pocket = UnifiedPocket {
+                id: unified.len() + 1,
+                residue_indices: geo_residues.clone(),
+                centroid: gp.centroid,
+                volume: gp.volume,
+                druggability: gp.druggability_score.total,
+                detection_type: DetectionType::Geometric,
+                confidence: Confidence::High,
+                evidence: Evidence {
+                    geometric_score: Some(gp.druggability_score.total),
+                    ..Default::default()
+                },
+            };
+            pocket.evidence.detected_by = vec!["geometric".into()];
+
+            // Check for cryptic overlap
+            for (i, cc) in cryptic.iter().enumerate() {
+                if cryptic_used[i] {
+                    continue;
+                }
+                let overlap = Self::residue_overlap(&geo_residues, &cc.residue_indices);
+                if overlap > self.config.consensus_overlap_threshold {
+                    pocket.detection_type = DetectionType::Consensus;
+                    pocket.evidence.flexibility_score = Some(cc.flexibility_score);
+                    pocket.evidence.packing_deficit = Some(cc.packing_deficit);
+                    pocket.evidence.hydrophobic_score = Some(cc.hydrophobic_score);
+                    pocket.evidence.detected_by.push("softspot".into());
+                    cryptic_used[i] = true;
+                }
+            }
+
+            // Check for allosteric overlap
+            for (i, ap) in allosteric.iter().enumerate() {
+                if allosteric_used[i] {
+                    continue;
+                }
+                let overlap = Self::residue_overlap(&geo_residues, &ap.residue_indices);
+                if overlap > self.config.consensus_overlap_threshold {
+                    pocket.detection_type = DetectionType::Consensus;
+                    if let Some(ref ac) = ap.evidence.allosteric_coupling {
+                        pocket.evidence.allosteric_coupling = Some(ac.coupling_strength);
+                        pocket.evidence.betweenness_centrality = Some(ac.betweenness_centrality);
+                        pocket.evidence.path_to_active_site = Some(ac.shortest_path_length);
+                    }
+                    pocket.evidence.detected_by.push("allosteric".into());
+                    allosteric_used[i] = true;
+                }
+            }
+
+            unified.push(pocket);
+        }
+
+        // Add cryptic-only candidates
+        for (i, cc) in cryptic.iter().enumerate() {
+            if cryptic_used[i] {
+                continue;
+            }
+            unified.push(self.cryptic_to_unified(unified.len() + 1, cc.clone()));
+        }
+
+        // Add allosteric-only candidates
+        for (i, ap) in allosteric.iter().enumerate() {
+            if allosteric_used[i] {
+                continue;
+            }
+            unified.push(self.allosteric_to_unified(unified.len() + 1, ap.clone()));
+        }
+
+        // Sort by ranking score (highest first)
+        unified.sort_by(|a, b| {
+            Self::rank_score(b)
+                .partial_cmp(&Self::rank_score(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Re-assign IDs and truncate
+        for (i, pocket) in unified.iter_mut().enumerate() {
+            pocket.id = i + 1;
+        }
+
+        unified.truncate(self.config.max_pockets);
+        unified
+    }
+
+    /// Convert an allosteric pocket to unified pocket format
+    fn allosteric_to_unified(&self, id: usize, ap: AllostericPocket) -> UnifiedPocket {
+        let confidence = match ap.confidence.level {
+            crate::allosteric::Confidence::High => Confidence::High,
+            crate::allosteric::Confidence::Medium => Confidence::Medium,
+            crate::allosteric::Confidence::Low => Confidence::Low,
+        };
+
+        let mut evidence = Evidence {
+            detected_by: vec!["allosteric".into()],
+            ..Default::default()
+        };
+
+        // Transfer allosteric evidence
+        if let Some(ref ac) = ap.evidence.allosteric_coupling {
+            evidence.allosteric_coupling = Some(ac.coupling_strength);
+            evidence.betweenness_centrality = Some(ac.betweenness_centrality);
+            evidence.path_to_active_site = Some(ac.shortest_path_length);
+        }
+
+        // Transfer conservation evidence
+        if let Some(ref cons) = ap.evidence.conservation {
+            evidence.conservation = Some(cons.mean_score);
+        }
+
+        // Transfer flexibility evidence
+        if let Some(ref flex) = ap.evidence.flexibility {
+            evidence.flexibility_score = Some(flex.score);
+            evidence.packing_deficit = Some(flex.packing_deficit);
+        }
+
+        // Transfer geometric evidence
+        if let Some(ref geo) = ap.evidence.geometric {
+            evidence.geometric_score = Some(geo.druggability);
+        }
+
+        UnifiedPocket {
+            id,
+            residue_indices: ap.residue_indices,
+            centroid: ap.centroid,
+            volume: ap.volume,
+            druggability: ap.druggability,
+            detection_type: DetectionType::Allosteric,
+            confidence,
+            evidence,
+        }
+    }
+
     /// Convert a cryptic candidate to unified pocket format
     fn cryptic_to_unified(&self, id: usize, cc: CrypticCandidate) -> UnifiedPocket {
         let confidence = match cc.confidence {
@@ -456,6 +682,9 @@ impl UnifiedDetector {
                 contact_order: None,    // TODO: Extract from enhanced rationale
                 conservation: None,     // TODO: Extract from enhanced rationale
                 probe_score: None,      // TODO: Extract from enhanced rationale
+                allosteric_coupling: None,
+                betweenness_centrality: None,
+                path_to_active_site: None,
                 detected_by: vec!["softspot".into()],
             },
         }
@@ -476,12 +705,13 @@ impl UnifiedDetector {
 
     /// Calculate ranking score for sorting
     ///
-    /// Consensus pockets rank highest, then geometric, then cryptic
+    /// Consensus pockets rank highest, then geometric, then allosteric, then cryptic
     fn rank_score(p: &UnifiedPocket) -> f64 {
         let base = p.druggability;
         match p.detection_type {
-            DetectionType::Consensus => base * 1.2,
+            DetectionType::Consensus => base * 1.25,
             DetectionType::Geometric => base * 1.0,
+            DetectionType::Allosteric => base * 0.95, // Allosteric slightly lower than geometric
             DetectionType::Cryptic => base * 0.85,
         }
     }
