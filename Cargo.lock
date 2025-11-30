@@ -3160,6 +3160,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "criterion",
  "crossterm",
  "directories",
  "env_logger",
@@ -3255,6 +3256,7 @@ dependencies = [
  "nalgebra 0.32.6",
  "ndarray 0.15.6",
  "ordered-float 4.6.0",
+ "ort",
  "petgraph",
  "prism-core",
  "prism-gpu",
@@ -3271,6 +3273,7 @@ name = "prism-gpu"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "criterion",
  "crossbeam-utils",
  "cudarc",
  "env_logger",
@@ -3320,6 +3323,7 @@ dependencies = [
  "prism-whcr",
  "proptest",
  "pyo3",
+ "rand 0.8.5",
  "rayon",
  "regex",
  "serde",

@@ -569,13 +569,16 @@ mod tests {
         });
 
         // Create 2 clusters of spheres
+        // Each cluster needs at least min_pts+1 points for DBSCAN to form clusters
         let spheres = vec![
+            // First cluster
             AlphaSphere { center: [0.0, 0.0, 0.0], radius: 1.0, contact_atoms: vec![] },
             AlphaSphere { center: [1.0, 0.0, 0.0], radius: 1.0, contact_atoms: vec![] },
             AlphaSphere { center: [0.5, 0.5, 0.0], radius: 1.0, contact_atoms: vec![] },
-            // Second cluster far away
+            // Second cluster far away - needs 3 points for min_pts=2
             AlphaSphere { center: [10.0, 10.0, 10.0], radius: 1.0, contact_atoms: vec![] },
             AlphaSphere { center: [11.0, 10.0, 10.0], radius: 1.0, contact_atoms: vec![] },
+            AlphaSphere { center: [10.5, 10.5, 10.0], radius: 1.0, contact_atoms: vec![] },
         ];
 
         let clusters = detector.cluster_spheres(&spheres);

@@ -16,6 +16,10 @@ use crate::pocket::properties::Pocket;
 use crate::scoring::{Components, DrugabilityClass, DruggabilityScore};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+#[cfg(feature = "cuda")]
+use prism_gpu::LbsGpu;
 
 /// Physical constants
 mod constants {
@@ -169,11 +173,36 @@ impl SpatialGrid {
 /// Grid-based pocket detector using dense alpha sphere sampling
 pub struct VoronoiDetector {
     config: VoronoiDetectorConfig,
+    #[cfg(feature = "cuda")]
+    gpu: Option<Arc<LbsGpu>>,
 }
 
 impl VoronoiDetector {
     pub fn new(config: VoronoiDetectorConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            #[cfg(feature = "cuda")]
+            gpu: None,
+        }
+    }
+
+    /// Create a detector with GPU acceleration
+    #[cfg(feature = "cuda")]
+    pub fn with_gpu(mut self, gpu: Arc<LbsGpu>) -> Self {
+        self.gpu = Some(gpu);
+        self
+    }
+
+    /// Check if GPU acceleration is available and enabled
+    #[cfg(feature = "cuda")]
+    pub fn has_gpu(&self) -> bool {
+        self.gpu.as_ref().map(|g| g.has_pocket_detection()).unwrap_or(false)
+    }
+
+    /// Check if GPU is available (no-op when cuda feature is disabled)
+    #[cfg(not(feature = "cuda"))]
+    pub fn has_gpu(&self) -> bool {
+        false
     }
 
     /// Detect pockets using grid-based alpha sphere sampling
@@ -730,6 +759,185 @@ impl VoronoiDetector {
             },
         }
     }
+
+    /// GPU-accelerated alpha sphere generation
+    #[cfg(feature = "cuda")]
+    fn generate_grid_spheres_gpu(
+        &self,
+        atoms: &[crate::structure::Atom],
+    ) -> Option<Vec<AlphaSphere>> {
+        let gpu = self.gpu.as_ref()?;
+        if !gpu.has_pocket_detection() {
+            log::debug!("GPU pocket detection kernels not available");
+            return None;
+        }
+
+        // Convert atom data to f32 arrays for GPU
+        let coords: Vec<[f32; 3]> = atoms.iter()
+            .map(|a| [a.coord[0] as f32, a.coord[1] as f32, a.coord[2] as f32])
+            .collect();
+        let vdw: Vec<f32> = atoms.iter()
+            .map(|a| a.vdw_radius() as f32)
+            .collect();
+
+        // Compute grid bounds
+        let min_x = coords.iter().map(|c| c[0]).fold(f32::INFINITY, f32::min) - 10.0;
+        let max_x = coords.iter().map(|c| c[0]).fold(f32::NEG_INFINITY, f32::max) + 10.0;
+        let min_y = coords.iter().map(|c| c[1]).fold(f32::INFINITY, f32::min) - 10.0;
+        let max_y = coords.iter().map(|c| c[1]).fold(f32::NEG_INFINITY, f32::max) + 10.0;
+        let min_z = coords.iter().map(|c| c[2]).fold(f32::INFINITY, f32::min) - 10.0;
+        let max_z = coords.iter().map(|c| c[2]).fold(f32::NEG_INFINITY, f32::max) + 10.0;
+
+        // Generate alpha spheres on GPU
+        match gpu.generate_alpha_spheres(
+            &coords,
+            &vdw,
+            (min_x, max_x, min_y, max_y, min_z, max_z),
+            self.config.grid_spacing as f32,
+        ) {
+            Ok((sphere_coords, sphere_radii, sphere_burials, _valid)) => {
+                // Convert GPU results to AlphaSphere structs
+                let spheres: Vec<AlphaSphere> = sphere_coords.iter().zip(sphere_radii.iter()).zip(sphere_burials.iter())
+                    .filter(|((_, &r), &b)| {
+                        r >= self.config.min_alpha_radius as f32
+                            && r <= self.config.max_alpha_radius as f32
+                            && b >= self.config.min_burial_depth as f32
+                    })
+                    .map(|((center, &radius), &burial)| {
+                        // Find nearby atoms (simplified - use spatial query on CPU)
+                        let nearby_atoms: Vec<usize> = coords.iter().enumerate()
+                            .filter(|(_, c)| {
+                                let dx = center[0] - c[0];
+                                let dy = center[1] - c[1];
+                                let dz = center[2] - c[2];
+                                (dx*dx + dy*dy + dz*dz).sqrt() < self.config.max_alpha_radius as f32 + 3.0
+                            })
+                            .map(|(i, _)| i)
+                            .collect();
+
+                        AlphaSphere {
+                            center: [center[0] as f64, center[1] as f64, center[2] as f64],
+                            radius: radius as f64,
+                            nearby_atoms,
+                            burial_depth: burial as f64,
+                        }
+                    })
+                    .collect();
+
+                log::info!("GPU generated {} alpha spheres", spheres.len());
+                Some(spheres)
+            }
+            Err(e) => {
+                log::warn!("GPU alpha sphere generation failed: {}, falling back to CPU", e);
+                None
+            }
+        }
+    }
+
+    /// GPU-accelerated DBSCAN clustering
+    #[cfg(feature = "cuda")]
+    fn cluster_dbscan_gpu(&self, spheres: &[AlphaSphere]) -> Option<Vec<Vec<usize>>> {
+        let gpu = self.gpu.as_ref()?;
+        if !gpu.has_pocket_detection() {
+            return None;
+        }
+
+        // Convert sphere centers to f32 for GPU
+        let coords: Vec<[f32; 3]> = spheres.iter()
+            .map(|s| [s.center[0] as f32, s.center[1] as f32, s.center[2] as f32])
+            .collect();
+
+        match gpu.dbscan_cluster(
+            &coords,
+            self.config.dbscan_eps as f32,
+            self.config.dbscan_min_samples as i32,
+        ) {
+            Ok(labels) => {
+                // Group by cluster label
+                let num_clusters = labels.iter().filter(|&&l| l >= 0).max().map(|m| m + 1).unwrap_or(0) as usize;
+                let mut clusters: Vec<Vec<usize>> = vec![Vec::new(); num_clusters];
+
+                for (i, &label) in labels.iter().enumerate() {
+                    if label >= 0 {
+                        clusters[label as usize].push(i);
+                    }
+                }
+
+                let result: Vec<Vec<usize>> = clusters.into_iter().filter(|c| !c.is_empty()).collect();
+                log::info!("GPU DBSCAN found {} clusters", result.len());
+                Some(result)
+            }
+            Err(e) => {
+                log::warn!("GPU DBSCAN failed: {}, falling back to CPU", e);
+                None
+            }
+        }
+    }
+
+    /// Detect pockets with GPU acceleration (falls back to CPU if unavailable)
+    #[cfg(feature = "cuda")]
+    pub fn detect_gpu(&self, graph: &ProteinGraph) -> Vec<Pocket> {
+        let atoms = &graph.structure_ref.atoms;
+
+        if atoms.len() < 50 {
+            log::warn!("Structure too small ({} atoms) for pocket detection", atoms.len());
+            return Vec::new();
+        }
+
+        log::info!("Starting GPU-accelerated pocket detection for {} atoms", atoms.len());
+        let start = std::time::Instant::now();
+
+        // Try GPU alpha sphere generation first
+        let spheres = match self.generate_grid_spheres_gpu(atoms) {
+            Some(s) if !s.is_empty() => s,
+            _ => {
+                log::info!("Falling back to CPU alpha sphere generation");
+                let grid = SpatialGrid::new(atoms, self.config.max_alpha_radius * 2.0);
+                self.generate_grid_spheres(atoms, &grid)
+            }
+        };
+
+        log::info!("Generated {} alpha spheres", spheres.len());
+
+        if spheres.is_empty() {
+            log::warn!("No alpha spheres generated");
+            return Vec::new();
+        }
+
+        // Try GPU DBSCAN clustering
+        let clusters = match self.cluster_dbscan_gpu(&spheres) {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                log::info!("Falling back to CPU DBSCAN");
+                self.cluster_dbscan(&spheres)
+            }
+        };
+
+        log::info!("DBSCAN found {} clusters", clusters.len());
+
+        // Build pockets from clusters (CPU)
+        let mut pockets: Vec<Pocket> = clusters
+            .into_iter()
+            .enumerate()
+            .filter_map(|(id, sphere_indices)| {
+                self.build_pocket(id, &sphere_indices, &spheres, graph)
+            })
+            .collect();
+
+        // Sort by druggability
+        pockets.sort_by(|a, b| {
+            b.druggability_score.total
+                .partial_cmp(&a.druggability_score.total)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        pockets.truncate(20);
+
+        log::info!("GPU pocket detection complete: {} pockets in {:?}",
+                   pockets.len(), start.elapsed());
+
+        pockets
+    }
 }
 
 #[cfg(test)]
@@ -739,9 +947,9 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = VoronoiDetectorConfig::default();
-        assert_eq!(config.grid_spacing, 1.0);
-        assert_eq!(config.dbscan_eps, 4.5);
-        assert_eq!(config.dbscan_min_samples, 3);
+        assert_eq!(config.grid_spacing, constants::GRID_SPACING);
+        assert_eq!(config.dbscan_eps, constants::DBSCAN_EPS);
+        assert_eq!(config.dbscan_min_samples, constants::DBSCAN_MIN_PTS);
     }
 
     #[test]
