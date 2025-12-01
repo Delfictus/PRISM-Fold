@@ -53,13 +53,23 @@ impl HybridConsensusEngine {
         conservation: &HashMap<i32, f64>,
         centrality: &HashMap<i32, f64>,
     ) -> Vec<AllostericPocket> {
+        // Build residue index → PDB RESSEQ mapping from atoms
+        // The mapping preserves the order of first occurrence (like ProteinGraph.residues)
+        let residue_seq_map = build_residue_seq_map(atoms);
+
         // Step 1: Convert all sources to unified candidates
         let mut candidates: Vec<UnifiedCandidate> = Vec::new();
 
-        // Geometric pockets
+        // Geometric pockets - convert internal indices to PDB RESSEQ
         for pocket in geometric_pockets {
+            let residues: Vec<i32> = pocket
+                .residue_indices
+                .iter()
+                .filter_map(|&idx| residue_seq_map.get(idx).copied())
+                .collect();
+
             candidates.push(UnifiedCandidate {
-                residues: pocket.residue_indices.iter().map(|&i| i as i32).collect(),
+                residues,
                 centroid: pocket.centroid,
                 source: DetectionSource::Geometric,
                 score: pocket.druggability_score.total as f64,
@@ -583,4 +593,24 @@ pub struct AllostericCandidateRegion {
     pub path_length: f64,
     pub distance_to_active: f64,
     pub centrality: f64,
+}
+
+/// Build a mapping from internal residue index to PDB RESSEQ
+///
+/// This replicates how ProteinGraph builds its residue list:
+/// atoms are processed in order, and residues are assigned sequential
+/// indices (0, 1, 2...) in order of first occurrence.
+fn build_residue_seq_map(atoms: &[Atom]) -> Vec<i32> {
+    let mut seen: HashSet<(char, i32)> = HashSet::new();
+    let mut seq_map: Vec<i32> = Vec::new();
+
+    for atom in atoms {
+        let key = (atom.chain_id, atom.residue_seq);
+        if !seen.contains(&key) {
+            seen.insert(key);
+            seq_map.push(atom.residue_seq);
+        }
+    }
+
+    seq_map
 }

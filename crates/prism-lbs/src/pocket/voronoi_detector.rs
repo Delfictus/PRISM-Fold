@@ -683,14 +683,13 @@ impl VoronoiDetector {
             return None;
         }
 
-        // Get unique residues
+        // Get unique PDB residue sequence numbers (RESSEQ)
         let residue_indices: Vec<usize> = atom_indices
             .iter()
             .filter_map(|&ai| {
                 let atom = &atoms[ai];
-                graph.structure_ref.residues.iter().position(|r| {
-                    r.seq_number == atom.residue_seq && r.chain_id == atom.chain_id
-                })
+                // Use PDB RESSEQ (seq_number) directly, not internal index
+                Some(atom.residue_seq as usize)
             })
             .collect::<HashSet<_>>()
             .into_iter()

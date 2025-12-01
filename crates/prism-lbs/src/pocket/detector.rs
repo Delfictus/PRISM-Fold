@@ -309,16 +309,24 @@ impl PocketDetector {
                     enclosure_ratio(&graph.structure_ref, &atom_indices)
                 };
 
-                let residue_indices = atoms
-                    .iter()
-                    .filter_map(|&v_idx| {
-                        let atom_idx = graph.atom_indices[v_idx];
-                        let atom = &graph.structure_ref.atoms[atom_idx];
-                        graph.structure_ref.residues.iter().position(|r| {
-                            r.seq_number == atom.residue_seq && r.chain_id == atom.chain_id
+                // Collect unique PDB residue sequence numbers (RESSEQ)
+                let residue_indices: Vec<usize> = {
+                    let mut seen = std::collections::HashSet::new();
+                    atoms
+                        .iter()
+                        .filter_map(|&v_idx| {
+                            let atom_idx = graph.atom_indices[v_idx];
+                            let atom = &graph.structure_ref.atoms[atom_idx];
+                            // Use PDB RESSEQ (seq_number) directly, not internal index
+                            let key = (atom.chain_id, atom.residue_seq);
+                            if seen.insert(key) {
+                                Some(atom.residue_seq as usize)
+                            } else {
+                                None
+                            }
                         })
-                    })
-                    .collect::<Vec<_>>();
+                        .collect()
+                };
 
                 Pocket {
                     atom_indices,

@@ -361,14 +361,13 @@ impl CavityDetector {
         }
         let atom_indices: Vec<usize> = atom_set.into_iter().collect();
 
-        // Map to residue indices
+        // Map to PDB residue sequence numbers (RESSEQ)
         let residue_indices: Vec<usize> = atom_indices
             .iter()
             .filter_map(|&atom_idx| {
                 let atom = &graph.structure_ref.atoms[atom_idx];
-                graph.structure_ref.residues.iter().position(|r| {
-                    r.seq_number == atom.residue_seq && r.chain_id == atom.chain_id
-                })
+                // Use PDB RESSEQ (seq_number) directly, not internal index
+                Some(atom.residue_seq as usize)
             })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
