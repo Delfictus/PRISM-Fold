@@ -269,9 +269,11 @@ setup_directories() {
 
 check_prism_binary() {
     if [[ ! -f "$PRISM_BINARY" ]]; then
-        print_info "Building PRISM-LBS..."
+        print_info "Building PRISM-LBS with GPU acceleration..."
         cd "$PRISM_ROOT"
-        cargo build --release -p prism-lbs 2>&1 | tail -10
+        PATH="/home/diddy/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/bin:$PATH" \
+        CUDA_HOME=/usr/local/cuda-12.6 \
+        cargo build --release -p prism-lbs --features cuda 2>&1 | tail -10
         
         if [[ ! -f "$PRISM_BINARY" ]]; then
             print_fail "Failed to build PRISM-LBS binary"
@@ -350,11 +352,14 @@ run_prism() {
     local input_pdb=$1
     local output_json=$2
     local extra_args=${3:-""}
-    
+
     # Standard invocation - outputs JSON with pocket analysis
     # Use -i for input, --unified for cryptic+geometric detection
-    # Set PTX directory for GPU kernels
-    PRISM_PTX_DIR="${PRISM_ROOT}/target/ptx" "$PRISM_BINARY" -i "$input_pdb" -o "$output_json" --unified $extra_args 2>/dev/null
+    # Full GPU acceleration with CUDA environment
+    CUDA_HOME=/usr/local/cuda-12.6 \
+    PATH="/home/diddy/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/bin:$PATH" \
+    PRISM_PTX_DIR="${PRISM_ROOT}/target/ptx" \
+    "$PRISM_BINARY" -i "$input_pdb" -o "$output_json" --unified $extra_args 2>/dev/null
     
     # Verify output
     if [[ -f "$output_json" ]] && [[ -s "$output_json" ]]; then
