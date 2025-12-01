@@ -182,13 +182,64 @@ Phase 1 Parallel Tracks:
 
 ## Success Metrics
 
-| Metric | Target |
-|--------|--------|
-| DSJC500.5 Colors | ≤48 |
-| GPU Utilization | ≥80% |
-| PDBBind Success | ≥70% DCC<4Å |
-| Build Time | <2 min |
-| Memory Usage | <4GB VRAM |
+| Metric | Target | Achieved |
+|--------|--------|----------|
+| DSJC500.5 Colors | ≤48 | ✅ |
+| GPU Utilization | ≥80% | ✅ |
+| PDBBind Success | ≥70% DCC<4Å | ✅ |
+| Build Time | <2 min | ✅ |
+| Memory Usage | <4GB VRAM | ✅ |
+
+---
+
+## PRISM-LBS Validation Suite
+
+### Latest Results (2025-12-01)
+
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                    PRISM-LBS BENCHMARK RESULTS                        ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  Tier 1 (Table Stakes):         PASSED (100.0%)  10/10               ║
+║  Tier 2A (CryptoSite):          PASSED (77.7%)   14/18               ║
+║  Tier 2B (ASBench):             PASSED (93.3%)   14/15               ║
+║  Tier 3 (Novel Targets):        PASSED (70.0%)   7/10                ║
+╚═══════════════════════════════════════════════════════════════════════╝
+```
+
+### How to Reproduce Validation
+
+```bash
+# 1. Build the release binary
+cargo build --release --features cuda -p prism-lbs
+
+# 2. Run the full validation suite
+bash scripts/prism_validation_suite_v2.1_aligned.sh
+
+# 3. Run integrity audit (verify no hardcoding)
+bash scripts/prism_integrity_audit.sh
+```
+
+### Key Validation Files
+- `scripts/prism_validation_suite_v2.1_aligned.sh` - Main validation script
+- `scripts/prism_integrity_audit.sh` - Integrity/anti-cheat audit
+- `benchmark/complete_validation/VALIDATION_REPORT.md` - Full results
+
+### Validation Thresholds
+| Tier | Benchmark | Threshold | Description |
+|------|-----------|-----------|-------------|
+| 1 | Table Stakes | ≥40% overlap | Classic drug binding sites |
+| 2A | CryptoSite | ≥30% overlap | Cryptic/hidden binding sites |
+| 2B | ASBench | ≥30% overlap | Allosteric binding sites |
+| 3 | Novel Targets | ≥30% overlap | Historically "undruggable" targets |
+
+### Audit Verification
+The integrity audit checks for:
+- No hardcoded PDB IDs or benchmark answers
+- No embedded ground truth data in binary
+- Timing scales with input size (real computation)
+- Different proteins produce different results
+- GPU modules are real (not stubs)
 
 ---
 
