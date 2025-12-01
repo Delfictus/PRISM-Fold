@@ -501,9 +501,9 @@ run_tier1() {
             if (( $(echo "$overlap >= $OVERLAP_THRESHOLD_TIER1" | bc -l) )); then
                 status="PASS"
                 status_color=$GREEN
-                ((passed++))
+                ((passed++)) || true
             else
-                ((failed++))
+                ((failed++)) || true
             fi
             
             printf "%-8s %-25s %-10d %-10.1f %-10.3f %-9.1f%% ${status_color}%-8s${NC}\n" \
@@ -511,10 +511,10 @@ run_tier1() {
                 "$overlap_pct" "$status"
         else
             printf "%-8s %-25s ${RED}%-10s${NC}\n" "$pdb_id" "${protein:0:25}" "ERROR"
-            ((failed++))
+            ((failed++)) || true
         fi
         
-        ((total++))
+        ((total++)) || true
     done < "${GROUND_TRUTH_DIR}/tier1_binding_sites.csv"
     
     echo "─────────────────────────────────────────────────────────────────────────────────────"
@@ -593,7 +593,7 @@ run_tier2a() {
             if (( $(echo "$overlap >= $OVERLAP_THRESHOLD_TIER2" | bc -l) )); then
                 status="PASS"
                 status_color=$GREEN
-                ((passed++))
+                ((passed++)) || true
             fi
             
             printf "%-8s %-22s %-10s %-8d %-8d %-8d %-9.1f%% ${status_color}%-8s${NC}\n" \
@@ -603,7 +603,7 @@ run_tier2a() {
             printf "%-8s %-22s %-10s ${RED}%-8s${NC}\n" "$pdb_id" "${protein:0:22}" "$difficulty" "ERROR"
         fi
         
-        ((total++))
+        ((total++)) || true
     done < "${GROUND_TRUTH_DIR}/cryptosite_ground_truth.csv"
     
     echo "───────────────────────────────────────────────────────────────────────────────────────"
@@ -689,7 +689,7 @@ run_tier2b() {
             if (( $(echo "$overlap >= 0.30" | bc -l) )); then
                 status="PASS"
                 status_color=$GREEN
-                ((passed++))
+                ((passed++)) || true
             fi
             
             printf "%-8s %-20s %-10s %-8d %-10d %-9.1f%% ${status_color}%-8s${NC}\n" \
@@ -699,7 +699,7 @@ run_tier2b() {
             printf "%-8s %-20s %-10s ${RED}%-8s${NC}\n" "$pdb_id" "${protein:0:20}" "${distance}Å" "ERROR"
         fi
         
-        ((total++))
+        ((total++)) || true
     done < "${GROUND_TRUTH_DIR}/asbench_ground_truth.csv"
     
     echo "────────────────────────────────────────────────────────────────────────────────────"
@@ -783,7 +783,7 @@ run_tier3() {
             if (( $(echo "$overlap >= $OVERLAP_THRESHOLD_TIER3" | bc -l) )); then
                 found_status="YES"
                 status_color=$GREEN
-                ((found++))
+                ((found++)) || true
             fi
             
             printf "%-8s %-12s %-20s %-8d %-10.3f %-9.1f%% ${status_color}%-8s${NC}\n" \
@@ -793,7 +793,7 @@ run_tier3() {
             printf "%-8s %-12s %-20s ${RED}%-8s${NC}\n" "$pdb_id" "$target" "${drug:0:20}" "ERROR"
         fi
         
-        ((total++))
+        ((total++)) || true
     done < "${GROUND_TRUTH_DIR}/novel_targets_ground_truth.csv"
     
     echo "────────────────────────────────────────────────────────────────────────────────────"
