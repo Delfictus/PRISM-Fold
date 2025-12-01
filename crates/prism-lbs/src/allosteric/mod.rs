@@ -17,6 +17,7 @@
 
 pub mod types;
 pub mod domain_decomposition;
+pub mod gpu_apsp;
 pub mod hinge_detection;
 pub mod msa_conservation;
 pub mod residue_network;
@@ -28,6 +29,7 @@ pub mod detector;
 // Re-exports
 pub use types::*;
 pub use domain_decomposition::DomainDecomposer;
+pub use gpu_apsp::{GpuFloydWarshall, betweenness_centrality, closeness_centrality};
 pub use hinge_detection::HingeDetector;
 pub use msa_conservation::ConservationAnalyzer;
 pub use residue_network::ResidueNetworkAnalyzer;

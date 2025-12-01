@@ -13,6 +13,7 @@
 
 use crate::graph::ProteinGraph;
 use crate::pocket::properties::Pocket;
+use crate::pocket::delaunay_detector::{DelaunayAlphaSphereDetector, DelaunayAlphaSphere};
 use crate::scoring::{Components, DrugabilityClass, DruggabilityScore};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -69,6 +70,18 @@ mod constants {
     pub const MAX_NEARBY_ATOMS: usize = 100;  // Relaxed
 }
 
+/// Detection method for alpha sphere generation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetectionMethod {
+    /// Grid-based sampling (faster, denser spheres)
+    #[default]
+    Grid,
+    /// Delaunay tessellation (mathematically precise, fpocket-compatible)
+    Delaunay,
+    /// Hybrid: Delaunay + grid refinement (best quality)
+    Hybrid,
+}
+
 /// Configuration for grid-based pocket detection
 #[derive(Debug, Clone)]
 pub struct VoronoiDetectorConfig {
@@ -82,6 +95,8 @@ pub struct VoronoiDetectorConfig {
     pub max_atoms: usize,
     pub grid_spacing: f64,
     pub min_burial_depth: f64,
+    /// Detection method (Grid, Delaunay, or Hybrid)
+    pub detection_method: DetectionMethod,
 }
 
 impl Default for VoronoiDetectorConfig {
@@ -97,6 +112,7 @@ impl Default for VoronoiDetectorConfig {
             max_atoms: constants::MAX_ATOMS,
             grid_spacing: constants::GRID_SPACING,
             min_burial_depth: constants::MIN_BURIAL_DEPTH,
+            detection_method: DetectionMethod::default(),
         }
     }
 }
@@ -205,7 +221,7 @@ impl VoronoiDetector {
         false
     }
 
-    /// Detect pockets using grid-based alpha sphere sampling
+    /// Detect pockets using configured detection method
     pub fn detect(&self, graph: &ProteinGraph) -> Vec<Pocket> {
         let atoms = &graph.structure_ref.atoms;
 
@@ -214,17 +230,32 @@ impl VoronoiDetector {
             return Vec::new();
         }
 
-        log::info!("Starting grid-based pocket detection for {} atoms", atoms.len());
+        log::info!("Starting pocket detection ({:?}) for {} atoms",
+                   self.config.detection_method, atoms.len());
         let start = std::time::Instant::now();
 
         // Step 1: Build spatial grid for fast neighbor lookup
         let grid = SpatialGrid::new(atoms, self.config.max_alpha_radius * 2.0);
         log::debug!("Built spatial grid in {:?}", start.elapsed());
 
-        // Step 2: Generate alpha spheres by grid sampling
-        let spheres = self.generate_grid_spheres(atoms, &grid);
-        log::info!("Generated {} alpha spheres (grid spacing: {:.1}Å)",
-                   spheres.len(), self.config.grid_spacing);
+        // Step 2: Generate alpha spheres based on configured method
+        let spheres = match self.config.detection_method {
+            DetectionMethod::Grid => {
+                self.generate_grid_spheres(atoms, &grid)
+            }
+            DetectionMethod::Delaunay => {
+                self.generate_delaunay_spheres(atoms, &grid)
+            }
+            DetectionMethod::Hybrid => {
+                // Combine Delaunay + grid for maximum coverage
+                let mut delaunay_spheres = self.generate_delaunay_spheres(atoms, &grid);
+                let grid_spheres = self.generate_grid_spheres(atoms, &grid);
+                delaunay_spheres.extend(grid_spheres);
+                self.deduplicate_alpha_spheres(delaunay_spheres)
+            }
+        };
+        log::info!("Generated {} alpha spheres ({:?} method)",
+                   spheres.len(), self.config.detection_method);
 
         if spheres.is_empty() {
             log::warn!("No alpha spheres generated - structure may be too small or too exposed");
@@ -325,6 +356,116 @@ impl VoronoiDetector {
             .collect();
 
         spheres
+    }
+
+    /// Generate alpha spheres using Delaunay tessellation (fpocket method)
+    fn generate_delaunay_spheres(
+        &self,
+        atoms: &[crate::structure::Atom],
+        grid: &SpatialGrid,
+    ) -> Vec<AlphaSphere> {
+        log::debug!("[Delaunay] Starting Delaunay tessellation for {} atoms", atoms.len());
+
+        // Create Delaunay detector with matching parameters
+        let detector = DelaunayAlphaSphereDetector::new(
+            self.config.min_alpha_radius,
+            self.config.max_alpha_radius,
+        );
+
+        // Run Delaunay detection
+        let delaunay_spheres = detector.detect(atoms);
+        log::debug!("[Delaunay] Found {} raw Delaunay spheres", delaunay_spheres.len());
+
+        // Compute protein centroid for depth calculation
+        let centroid = [
+            atoms.iter().map(|a| a.coord[0]).sum::<f64>() / atoms.len() as f64,
+            atoms.iter().map(|a| a.coord[1]).sum::<f64>() / atoms.len() as f64,
+            atoms.iter().map(|a| a.coord[2]).sum::<f64>() / atoms.len() as f64,
+        ];
+
+        let max_dist = atoms.iter()
+            .map(|a| {
+                let dx = a.coord[0] - centroid[0];
+                let dy = a.coord[1] - centroid[1];
+                let dz = a.coord[2] - centroid[2];
+                (dx*dx + dy*dy + dz*dz).sqrt()
+            })
+            .fold(0.0_f64, |a, b| a.max(b));
+
+        // Convert Delaunay spheres to our AlphaSphere format
+        let spheres: Vec<AlphaSphere> = delaunay_spheres
+            .into_iter()
+            .filter(|ds| ds.is_valid)
+            .filter_map(|ds| {
+                // Query nearby atoms using spatial grid
+                let nearby_atoms = grid.query(&ds.center, self.config.max_alpha_radius);
+                if nearby_atoms.len() < constants::MIN_NEARBY_ATOMS {
+                    return None;
+                }
+                if nearby_atoms.len() > constants::MAX_NEARBY_ATOMS {
+                    return None;
+                }
+
+                // Compute burial depth
+                let dist_to_centroid = {
+                    let dx = ds.center[0] - centroid[0];
+                    let dy = ds.center[1] - centroid[1];
+                    let dz = ds.center[2] - centroid[2];
+                    (dx*dx + dy*dy + dz*dz).sqrt()
+                };
+
+                let normalized_depth = 1.0 - (dist_to_centroid / max_dist).min(1.0);
+                let density_factor = (nearby_atoms.len() as f64 / 30.0).min(1.0);
+                let burial_depth = normalized_depth * 25.0 * density_factor;
+
+                if burial_depth < self.config.min_burial_depth {
+                    return None;
+                }
+
+                Some(AlphaSphere {
+                    center: ds.center,
+                    radius: ds.radius,
+                    nearby_atoms,
+                    burial_depth,
+                })
+            })
+            .collect();
+
+        log::info!("[Delaunay] Converted {} spheres after filtering", spheres.len());
+        spheres
+    }
+
+    /// Deduplicate alpha spheres (for Hybrid mode)
+    fn deduplicate_alpha_spheres(&self, mut spheres: Vec<AlphaSphere>) -> Vec<AlphaSphere> {
+        let initial_count = spheres.len();
+        if initial_count < 2 {
+            return spheres;
+        }
+
+        // Sort by center for efficient deduplication
+        spheres.sort_by(|a, b| {
+            a.center[0].partial_cmp(&b.center[0]).unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.center[1].partial_cmp(&b.center[1]).unwrap_or(std::cmp::Ordering::Equal))
+                .then(a.center[2].partial_cmp(&b.center[2]).unwrap_or(std::cmp::Ordering::Equal))
+        });
+
+        let min_dist_sq = 0.25; // 0.5Å minimum separation
+        let mut unique = Vec::with_capacity(initial_count);
+        unique.push(spheres[0].clone());
+
+        for sphere in spheres.into_iter().skip(1) {
+            let last = unique.last().unwrap();
+            let dist_sq = (sphere.center[0] - last.center[0]).powi(2)
+                + (sphere.center[1] - last.center[1]).powi(2)
+                + (sphere.center[2] - last.center[2]).powi(2);
+
+            if dist_sq > min_dist_sq {
+                unique.push(sphere);
+            }
+        }
+
+        log::debug!("Deduplicated {} -> {} spheres", initial_count, unique.len());
+        unique
     }
 
     /// Try to create an alpha sphere at a grid point

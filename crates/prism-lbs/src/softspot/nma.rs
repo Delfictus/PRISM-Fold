@@ -17,6 +17,8 @@
 //! - Tobi & Bahar (2005) - Functional motions and binding sites
 
 use crate::structure::Atom;
+use super::lanczos::LanczosEigensolver;
+use nalgebra::DMatrix;
 use std::collections::HashMap;
 
 //=============================================================================
@@ -172,107 +174,55 @@ impl NmaAnalyzer {
         hessian
     }
 
-    /// Compute eigenvalues and eigenvectors using power iteration
+    /// Compute eigenvalues and eigenvectors using Lanczos algorithm
     ///
-    /// For large matrices, we use iterative methods rather than full diagonalization.
-    /// We compute only the lowest non-trivial modes which are most relevant.
+    /// Uses the robust Lanczos eigensolver with full reorthogonalization
+    /// for accurate computation of low-frequency modes.
     fn compute_eigenmodes(&self, hessian: &[Vec<f64>], n_residues: usize) -> (Vec<f64>, Vec<Vec<f64>>) {
         let dim = 3 * n_residues;
 
-        // For small systems, use simple power iteration for lowest modes
-        // Skip the first 6 trivial modes (translation + rotation)
-        let num_modes = (self.num_modes + 6).min(dim / 2);
-
-        let mut eigenvalues = Vec::with_capacity(num_modes);
-        let mut eigenvectors = Vec::with_capacity(num_modes);
-
-        // Use inverse power iteration to find smallest eigenvalues
-        // (which correspond to lowest frequency modes)
-        let mut deflated_matrix = hessian.to_vec();
-
-        for mode_idx in 0..num_modes {
-            let (eigenvalue, eigenvector) = self.power_iteration_smallest(&deflated_matrix, dim);
-
-            // Skip near-zero eigenvalues (trivial modes)
-            if eigenvalue.abs() < 1e-6 {
-                // Deflate the matrix to find next mode
-                self.deflate_matrix(&mut deflated_matrix, &eigenvector, eigenvalue);
-                continue;
-            }
-
-            eigenvalues.push(eigenvalue);
-            eigenvectors.push(eigenvector.clone());
-
-            // Deflate to find next mode
-            self.deflate_matrix(&mut deflated_matrix, &eigenvector, eigenvalue);
-
-            if eigenvalues.len() >= self.num_modes {
-                break;
+        // Convert Vec<Vec<f64>> to nalgebra DMatrix
+        let mut matrix_data = Vec::with_capacity(dim * dim);
+        for row in hessian.iter().take(dim) {
+            for j in 0..dim {
+                matrix_data.push(*row.get(j).unwrap_or(&0.0));
             }
         }
+        let hessian_matrix = DMatrix::from_row_slice(dim, dim, &matrix_data);
 
-        (eigenvalues, eigenvectors)
-    }
+        // Request enough modes to skip 6 trivial modes + get num_modes non-trivial
+        let k = (self.num_modes + 6).min(dim / 2).max(7);
 
-    /// Power iteration to find smallest eigenvalue
-    fn power_iteration_smallest(&self, matrix: &[Vec<f64>], dim: usize) -> (f64, Vec<f64>) {
-        let max_iter = 100;
-        let tolerance = 1e-6;
+        // Use Lanczos eigensolver with full reorthogonalization
+        let solver = LanczosEigensolver {
+            max_iter: 300,
+            tol: 1e-8,
+            num_lanczos_vectors: 50.min(dim),
+            seed: Some(42),
+        };
 
-        // Start with random vector
-        let mut v: Vec<f64> = (0..dim).map(|i| ((i * 17 + 13) % 100) as f64 / 100.0 - 0.5).collect();
-        self.normalize(&mut v);
+        let result = solver.compute_smallest(&hessian_matrix, k);
 
-        let mut eigenvalue = 0.0;
+        // Filter out trivial modes (eigenvalue < 1e-6)
+        let mut eigenvalues = Vec::with_capacity(self.num_modes);
+        let mut eigenvectors = Vec::with_capacity(self.num_modes);
 
-        // Add small shift to make matrix positive definite for inverse iteration
-        let shift = 0.01;
+        for (eigenvalue, eigenvector) in result.eigenvalues.iter().zip(result.eigenvectors.iter()) {
+            // Skip near-zero eigenvalues (trivial translation/rotation modes)
+            if *eigenvalue > 1e-6 {
+                eigenvalues.push(*eigenvalue);
+                eigenvectors.push(eigenvector.iter().cloned().collect());
 
-        for _ in 0..max_iter {
-            // Compute Av
-            let mut av = vec![0.0; dim];
-            for i in 0..dim {
-                for j in 0..dim {
-                    av[i] += (matrix[i][j] + if i == j { shift } else { 0.0 }) * v[j];
+                if eigenvalues.len() >= self.num_modes {
+                    break;
                 }
             }
-
-            // Rayleigh quotient for eigenvalue estimate
-            let new_eigenvalue: f64 = v.iter().zip(av.iter()).map(|(a, b)| a * b).sum();
-
-            // Normalize
-            self.normalize(&mut av);
-
-            // Check convergence
-            if (new_eigenvalue - eigenvalue).abs() < tolerance {
-                return (new_eigenvalue - shift, av);
-            }
-
-            eigenvalue = new_eigenvalue;
-            v = av;
         }
 
-        (eigenvalue - shift, v)
-    }
+        log::debug!("[NMA] Lanczos found {} non-trivial modes (converged: {})",
+                   eigenvalues.len(), result.converged);
 
-    /// Deflate matrix by removing contribution of found eigenvector
-    fn deflate_matrix(&self, matrix: &mut [Vec<f64>], eigenvector: &[f64], eigenvalue: f64) {
-        let dim = eigenvector.len();
-        for i in 0..dim {
-            for j in 0..dim {
-                matrix[i][j] -= eigenvalue * eigenvector[i] * eigenvector[j];
-            }
-        }
-    }
-
-    /// Normalize a vector in place
-    fn normalize(&self, v: &mut [f64]) {
-        let norm: f64 = v.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if norm > 1e-10 {
-            for x in v.iter_mut() {
-                *x /= norm;
-            }
-        }
+        (eigenvalues, eigenvectors)
     }
 
     /// Calculate per-residue mobility from eigenmodes

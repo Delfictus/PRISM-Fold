@@ -68,6 +68,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.2"
 approx = "0.5"
 tempfile = "3.8"
+rand_chacha = "0.3"
 
 [features]
 default = ["cuda"]

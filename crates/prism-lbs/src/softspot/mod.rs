@@ -50,6 +50,8 @@ mod types;
 pub mod conservation;
 pub mod contact_order;
 pub mod enhanced;
+pub mod gpu_lanczos;
+pub mod lanczos;
 pub mod nma;
 pub mod probe_clustering;
 
@@ -61,5 +63,7 @@ pub use types::{CrypticCandidate, CrypticConfidence, FlexibleResidue};
 // Re-export enhancement analyzers for advanced use
 pub use conservation::{ConservationAnalyzer, ConservationResult};
 pub use contact_order::{ContactOrderAnalyzer, ContactOrderResult};
+pub use gpu_lanczos::{GpuEigenResult, GpuLanczosEigensolver};
+pub use lanczos::{EigenResult, LanczosEigensolver};
 pub use nma::{NmaAnalyzer, NmaResult};
 pub use probe_clustering::{ProbeClusteringAnalyzer, ProbeClusteringResult};

@@ -8,6 +8,7 @@
 //! Paths through the network model signal propagation during allosteric transitions.
 
 use crate::structure::Atom;
+use super::gpu_apsp::GpuFloydWarshall;
 use super::types::*;
 use std::collections::{HashMap, HashSet};
 
@@ -19,6 +20,8 @@ pub struct ResidueNetworkAnalyzer {
     pub weight_scheme: EdgeWeightScheme,
     /// Use Cβ atoms (Cα for Gly) instead of Cα only
     pub use_cb_atoms: bool,
+    /// GPU-accelerated Floyd-Warshall solver (optional)
+    pub gpu_solver: Option<GpuFloydWarshall>,
 }
 
 impl Default for ResidueNetworkAnalyzer {
@@ -27,6 +30,7 @@ impl Default for ResidueNetworkAnalyzer {
             contact_cutoff: 10.0,
             weight_scheme: EdgeWeightScheme::DistanceBased { sigma: 6.0 },
             use_cb_atoms: true,
+            gpu_solver: Some(GpuFloydWarshall::new()),
         }
     }
 }
@@ -37,7 +41,25 @@ impl ResidueNetworkAnalyzer {
             contact_cutoff,
             weight_scheme,
             use_cb_atoms: true,
+            gpu_solver: Some(GpuFloydWarshall::new()),
         }
+    }
+
+    /// Create analyzer with GPU acceleration
+    #[cfg(feature = "cuda")]
+    pub fn with_gpu(mut self) -> Self {
+        let mut solver = GpuFloydWarshall::new();
+        if let Err(e) = solver.init_cuda() {
+            log::warn!("GPU Floyd-Warshall initialization failed: {}", e);
+        }
+        self.gpu_solver = Some(solver);
+        self
+    }
+
+    /// Disable GPU acceleration (use CPU-only)
+    pub fn cpu_only(mut self) -> Self {
+        self.gpu_solver = None;
+        self
     }
 
     /// Build residue interaction network from structure
@@ -132,7 +154,53 @@ impl ResidueNetworkAnalyzer {
 
     /// Calculate shortest paths using Floyd-Warshall algorithm
     /// Returns (distance matrix, predecessor matrix for path reconstruction)
+    /// Uses GPU acceleration when available, falls back to CPU
     pub fn floyd_warshall(&self, network: &ResidueNetwork) -> (Vec<f64>, Vec<Option<usize>>) {
+        let n = network.size;
+
+        // Predecessor matrix for path reconstruction (always built on CPU)
+        let mut next: Vec<Option<usize>> = vec![None; n * n];
+
+        // Initialize next pointers from adjacency
+        for i in 0..n {
+            for j in 0..n {
+                let weight = network.get(i, j);
+                if weight > 0.0 && i != j {
+                    next[i * n + j] = Some(j);
+                }
+            }
+        }
+
+        // Try GPU-accelerated computation
+        if let Some(ref gpu_solver) = self.gpu_solver {
+            // Convert to f32 adjacency matrix for GPU
+            let mut adjacency_f32 = vec![0.0f32; n * n];
+            for i in 0..n {
+                for j in 0..n {
+                    adjacency_f32[i * n + j] = network.get(i, j) as f32;
+                }
+            }
+
+            log::debug!("[Floyd-Warshall] Using GPU solver for {} x {} matrix", n, n);
+            let dist_f32 = gpu_solver.compute(&adjacency_f32, n);
+
+            // Convert distances back to f64
+            let dist: Vec<f64> = dist_f32.into_iter().map(|d| d as f64).collect();
+
+            // Update next matrix from computed distances
+            // (GPU gives us distances but not predecessors, so we recompute next)
+            self.update_predecessors_from_distances(n, &dist, &mut next, network);
+
+            return (dist, next);
+        }
+
+        // CPU fallback
+        log::debug!("[Floyd-Warshall] Using CPU solver for {} x {} matrix", n, n);
+        self.cpu_floyd_warshall(network)
+    }
+
+    /// CPU implementation of Floyd-Warshall
+    fn cpu_floyd_warshall(&self, network: &ResidueNetwork) -> (Vec<f64>, Vec<Option<usize>>) {
         let n = network.size;
 
         // Distance matrix (initialized to infinity for no edge)
@@ -169,6 +237,45 @@ impl ResidueNetworkAnalyzer {
         }
 
         (dist, next)
+    }
+
+    /// Update predecessor matrix from computed distances
+    fn update_predecessors_from_distances(
+        &self,
+        n: usize,
+        dist: &[f64],
+        next: &mut [Option<usize>],
+        network: &ResidueNetwork,
+    ) {
+        // For each pair (i,j), find the correct predecessor
+        // This is a reconstruction step needed after GPU computation
+        for i in 0..n {
+            for j in 0..n {
+                if i == j || dist[i * n + j].is_infinite() {
+                    next[i * n + j] = None;
+                    continue;
+                }
+
+                // Check all neighbors of i to find the one on shortest path
+                for k in 0..n {
+                    let weight = network.get(i, k);
+                    if weight > 0.0 && k != i {
+                        // If going through k gives us the shortest path
+                        let path_via_k = dist[i * n + k] + dist[k * n + j];
+                        if (path_via_k - dist[i * n + j]).abs() < 1e-6 {
+                            // k is on the shortest path from i to j
+                            next[i * n + j] = Some(k);
+                            break;
+                        }
+                    }
+                }
+
+                // If no predecessor found through neighbors, check direct edge
+                if next[i * n + j].is_none() && network.get(i, j) > 0.0 {
+                    next[i * n + j] = Some(j);
+                }
+            }
+        }
     }
 
     /// Reconstruct path from predecessor matrix
