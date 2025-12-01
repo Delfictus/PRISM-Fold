@@ -249,8 +249,9 @@ impl PrismLbs {
 
         // 3.6 Expand pocket residues to capture nearby interaction-capable residues
         // This catches residues not directly pocket-lining but within binding distance
+        // Use 8Å radius with 100-residue cap (allows large kinase sites, prevents mega-pockets)
         for pocket in &mut pockets {
-            expand_pocket_residues(pocket, &structure.atoms, 10.0);
+            expand_pocket_residues(pocket, &structure.atoms, 8.0, 100);
         }
 
         // 4. Score pockets (GPU when available)
@@ -400,8 +401,17 @@ fn merge_adjacent_pockets_with_seq(
                     })
                 });
 
-                // Merge if: close distance, sharing residues, OR sequential neighbors
-                if dist < merge_distance || shared >= min_shared_residues || has_sequential_neighbor {
+                // Max pocket size limit (prevent mega-pockets)
+                let combined_residues = current.residue_indices.len() + current_pockets[j].residue_indices.len() - shared;
+                const MAX_POCKET_RESIDUES: usize = 120;  // Large kinase sites can have 50-100 residues
+
+                // Merge if: close distance AND (sharing residues OR sequential neighbors)
+                // Also enforce max size limit
+                let should_merge = dist < merge_distance
+                    && (shared >= min_shared_residues || has_sequential_neighbor)
+                    && combined_residues <= MAX_POCKET_RESIDUES;
+
+                if should_merge {
                     current = merge_two_pockets(current, current_pockets[j].clone());
                     used[j] = true;
                 }
@@ -492,12 +502,21 @@ fn merge_two_pockets(mut a: Pocket, b: Pocket) -> Pocket {
 ///
 /// This works better for elongated/multi-center binding sites by expanding
 /// from each pocket atom rather than just the centroid.
-fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius: f64) {
+///
+/// Parameters:
+/// - `expansion_radius`: Maximum distance (Å) to expand from pocket atoms
+/// - `max_residues`: Cap on total residues to prevent mega-pockets
+fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius: f64, max_residues: usize) {
     use std::collections::HashSet;
 
     let current_residues: HashSet<usize> = pocket.residue_indices.iter().copied().collect();
     let mut all_residues = current_residues.clone();
     let initial_count = all_residues.len();
+
+    // Skip expansion if pocket is already at max size
+    if initial_count >= max_residues {
+        return;
+    }
 
     // Build set of current pocket atom coordinates
     let pocket_atom_coords: Vec<[f64; 3]> = atoms
@@ -506,9 +525,12 @@ fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius:
         .map(|a| a.coord)
         .collect();
 
-    // For each atom in the structure, check if it's near ANY pocket atom
+    // Collect candidate residues with their distances
+    let mut candidates: Vec<(usize, f64)> = Vec::new();
+
     for atom in atoms {
-        if all_residues.contains(&(atom.residue_seq as usize)) {
+        let res_idx = atom.residue_seq as usize;
+        if all_residues.contains(&res_idx) {
             continue;
         }
 
@@ -525,8 +547,22 @@ fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius:
         }
 
         if min_dist < expansion_radius {
-            all_residues.insert(atom.residue_seq as usize);
+            // Track best (closest) distance for each residue
+            if let Some(existing) = candidates.iter_mut().find(|(r, _)| *r == res_idx) {
+                if min_dist < existing.1 {
+                    existing.1 = min_dist;
+                }
+            } else {
+                candidates.push((res_idx, min_dist));
+            }
         }
+    }
+
+    // Sort by distance (closest first) and add up to cap
+    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    let slots_available = max_residues.saturating_sub(all_residues.len());
+    for (res_idx, _) in candidates.into_iter().take(slots_available) {
+        all_residues.insert(res_idx);
     }
 
     pocket.residue_indices = all_residues.into_iter().collect();
@@ -535,9 +571,10 @@ fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius:
     let added = pocket.residue_indices.len() - initial_count;
     if added > 0 {
         log::debug!(
-            "Pocket expansion: added {} residues (now {})",
+            "Pocket expansion: added {} residues (now {}, max {})",
             added,
-            pocket.residue_indices.len()
+            pocket.residue_indices.len(),
+            max_residues
         );
     }
 }
