@@ -342,7 +342,8 @@ run_prism() {
     local extra_args=${3:-""}
     
     # Standard invocation - outputs JSON with pocket analysis
-    "$PRISM_BINARY" "$input_pdb" -o "$output_json" $extra_args 2>/dev/null
+    # Use -i for input, --unified for cryptic+geometric detection
+    "$PRISM_BINARY" -i "$input_pdb" -o "$output_json" --unified $extra_args 2>/dev/null
     
     # Verify output
     if [[ -f "$output_json" ]] && [[ -s "$output_json" ]]; then
