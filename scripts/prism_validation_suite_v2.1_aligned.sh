@@ -205,22 +205,24 @@ calculate_residue_overlap() {
 }
 
 # Extended overlap: check if ANY pocket covers ground truth
+# NOTE: Now using all residues (atom-based expansion handles water filtering)
 calculate_best_pocket_overlap() {
     local json_file=$1
     local ground_truth=$2
-    
+
     local best_overlap=0
     local pocket_count=$(parse_pocket_count "$json_file")
-    
-    for ((i=0; i<pocket_count && i<10; i++)); do
-        local pocket_residues=$(jq -r ".pockets[$i].residue_indices | .[]" "$json_file" 2>/dev/null | tr '\n' ' ')
+
+    for ((i=0; i<pocket_count && i<20; i++)); do
+        # Get all pocket residues (no filter - allows residues > 100 for larger proteins)
+        local pocket_residues=$(jq -r ".pockets[$i].residue_indices | .[] | select(. > 0)" "$json_file" 2>/dev/null | tr '\n' ' ')
         local overlap=$(calculate_residue_overlap "$pocket_residues" "$ground_truth")
-        
+
         if (( $(echo "$overlap > $best_overlap" | bc -l) )); then
             best_overlap=$overlap
         fi
     done
-    
+
     echo "$best_overlap"
 }
 
