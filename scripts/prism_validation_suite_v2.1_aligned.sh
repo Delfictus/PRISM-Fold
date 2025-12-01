@@ -126,41 +126,49 @@ parse_top_volume() {
 }
 
 # Parse top pocket druggability
-# Uses actual field: .pockets[0].druggability_score.total
+# Uses actual field: .pockets[0].druggability (unified detector output)
 parse_top_druggability() {
     local json_file=$1
-    jq '.pockets[0].druggability_score.total // 0' "$json_file" 2>/dev/null || echo "0"
+    jq '.pockets[0].druggability // .pockets[0].druggability_score.total // 0' "$json_file" 2>/dev/null || echo "0"
 }
 
 # Parse druggability classification
-# Uses actual field: .pockets[0].druggability_score.classification
+# Derive from druggability score (>0.5 = Druggable)
 parse_classification() {
     local json_file=$1
-    jq -r '.pockets[0].druggability_score.classification // "Unknown"' "$json_file" 2>/dev/null || echo "Unknown"
+    local score=$(jq '.pockets[0].druggability // .pockets[0].druggability_score.total // 0' "$json_file" 2>/dev/null)
+    if (( $(echo "$score > 0.5" | bc -l) )); then
+        echo "Druggable"
+    else
+        echo "DifficultTarget"
+    fi
 }
 
-# Parse mean flexibility (for cryptic site detection)
-# Uses actual field: .pockets[].mean_flexibility
+# Parse high confidence pockets (for cryptic site detection)
+# Uses actual field: .pockets[].confidence or .pockets[].evidence.flexibility_score
 parse_high_flexibility_pockets() {
     local json_file=$1
     local threshold=${2:-25}
-    jq "[.pockets[] | select(.mean_flexibility > $threshold)] | length" "$json_file" 2>/dev/null || echo "0"
+    # Check for flexibility in evidence or high confidence cryptic pockets
+    jq "[.pockets[] | select(.confidence == \"high\" or (.evidence.flexibility_score // 0) > 0.5)] | length" "$json_file" 2>/dev/null || echo "0"
 }
 
-# Parse deep pockets (for buried site detection)
-# Uses actual field: .pockets[].mean_depth
+# Parse deep pockets (using allosteric coupling as proxy for buried sites)
+# Uses actual field: .pockets[].evidence.allosteric_coupling
 parse_deep_pockets() {
     local json_file=$1
     local threshold=${2:-10}
-    jq "[.pockets[] | select(.mean_depth > $threshold)] | length" "$json_file" 2>/dev/null || echo "0"
+    # Use allosteric_coupling > 0.3 as proxy for buried/deep pockets
+    jq "[.pockets[] | select((.evidence.allosteric_coupling // 0) > 0.3)] | length" "$json_file" 2>/dev/null || echo "0"
 }
 
-# Get pockets with high enclosure (potential binding sites)
-# Uses actual field: .pockets[].enclosure_ratio
+# Get pockets with high confidence (potential binding sites)
+# Uses actual field: .pockets[].confidence
 parse_enclosed_pockets() {
     local json_file=$1
     local threshold=${2:-0.5}
-    jq "[.pockets[] | select(.enclosure_ratio > $threshold)] | length" "$json_file" 2>/dev/null || echo "0"
+    # Use high confidence as proxy for well-enclosed pockets
+    jq "[.pockets[] | select(.confidence == \"high\" or .confidence == \"medium\")] | length" "$json_file" 2>/dev/null || echo "0"
 }
 
 # Calculate overlap between detected residues and ground truth
@@ -343,7 +351,8 @@ run_prism() {
     
     # Standard invocation - outputs JSON with pocket analysis
     # Use -i for input, --unified for cryptic+geometric detection
-    "$PRISM_BINARY" -i "$input_pdb" -o "$output_json" --unified $extra_args 2>/dev/null
+    # Set PTX directory for GPU kernels
+    PRISM_PTX_DIR="${PRISM_ROOT}/target/ptx" "$PRISM_BINARY" -i "$input_pdb" -o "$output_json" --unified $extra_args 2>/dev/null
     
     # Verify output
     if [[ -f "$output_json" ]] && [[ -s "$output_json" ]]; then
