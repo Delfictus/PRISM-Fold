@@ -1,7 +1,8 @@
 #!/bin/bash
 # ============================================================================
-# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
-# This script will NOT download data. You must provide it manually.
+# PRISM-LBS BENCHMARK — LOCAL DATA ONLY
+# This script assumes all datasets are pre-placed in benchmarks/datasets/
+# No auto-download. No network access. Ever.
 # ============================================================================
 #
 # LIGYSIS External Ground Truth Benchmark Runner
@@ -10,7 +11,7 @@
 #   - benchmarks/datasets/ligysis/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl
 #   - benchmarks/datasets/ligysis/structures/*.cif or *.pdb
 #
-# Download sources:
+# Download sources (manual only):
 #   - Ground truth: https://zenodo.org/doi/10.5281/zenodo.13171100
 #   - Structures: https://files.rcsb.org/download/{pdb_id}.cif
 #

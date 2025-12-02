@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================================
-# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
-# This script will NOT download data. You must provide it manually.
+# PRISM-LBS BENCHMARK — LOCAL DATA ONLY
+# This script assumes all datasets are pre-placed in benchmarks/datasets/
+# No auto-download. No network access. Ever.
 # ============================================================================
 """
 CryptoBench External Ground Truth Evaluation for PRISM-LBS

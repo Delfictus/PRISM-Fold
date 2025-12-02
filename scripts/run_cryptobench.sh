@@ -1,7 +1,8 @@
 #!/bin/bash
 # ============================================================================
-# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
-# This script will NOT download data. You must provide it manually.
+# PRISM-LBS BENCHMARK — LOCAL DATA ONLY
+# This script assumes all datasets are pre-placed in benchmarks/datasets/
+# No auto-download. No network access. Ever.
 # ============================================================================
 #
 # CryptoBench External Ground Truth Benchmark Runner
@@ -11,16 +12,17 @@
 #   - benchmarks/datasets/cryptobench/folds.json
 #   - benchmarks/datasets/cryptobench/structures/test/*.cif or *.pdb
 #
-# Download sources:
+# Download sources (manual only):
 #   - Dataset: https://osf.io/pz4a9/
 #   - Structures: https://files.rcsb.org/download/{pdb_id}.cif
 #
 # Usage:
-#   ./scripts/run_cryptobench.sh [--quick] [--split test]
+#   ./scripts/run_cryptobench.sh [--quick]
 #
 # Options:
-#   --quick      Run on 20 structures for quick testing
-#   --split      Specify split (test, train-0, train-1, train-2, train-3)
+#   --quick              Run on 20 structures for quick testing
+#   --allow-non-test     REQUIRED flag to use non-test splits (disabled by default)
+#   --split SPLIT        Specify split (only with --allow-non-test)
 #
 
 set -e
@@ -48,10 +50,15 @@ NC='\033[0m'
 # Parse arguments
 QUICK_MODE=false
 SPLIT="test"
+ALLOW_NON_TEST=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --quick) QUICK_MODE=true; shift ;;
-        --split) SPLIT="$2"; shift 2 ;;
+        --allow-non-test) ALLOW_NON_TEST=true; shift ;;
+        --split)
+            SPLIT="$2"
+            shift 2
+            ;;
         --download)
             echo -e "${RED}ERROR: --download flag is not supported.${NC}"
             echo "This script does NOT auto-download data."
@@ -62,6 +69,19 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# ============================================================================
+# ENFORCE TEST-SPLIT-ONLY BY DEFAULT
+# ============================================================================
+if [[ "$SPLIT" != "test" ]] && [[ "$ALLOW_NON_TEST" == "false" ]]; then
+    echo -e "${RED}ERROR: Non-test splits are disabled by default.${NC}"
+    echo ""
+    echo "To use split '$SPLIT', you MUST pass --allow-non-test explicitly:"
+    echo "  ./scripts/run_cryptobench.sh --allow-non-test --split $SPLIT"
+    echo ""
+    echo "Default behavior uses only the official test split."
+    exit 1
+fi
 
 echo ""
 echo "============================================================"
