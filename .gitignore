@@ -73,7 +73,8 @@ Thumbs.db
 *.deb
 *.tar.gz
 *.tgz
-output/
+/output/
+!**/src/output/
 
 # Editor backups
 *.swp

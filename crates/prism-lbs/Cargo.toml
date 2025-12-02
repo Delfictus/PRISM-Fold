@@ -56,6 +56,7 @@ indexmap = "2.0"
 regex = "1.9"
 lazy_static = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
 
 # GPU support
 cudarc = { workspace = true, optional = true }

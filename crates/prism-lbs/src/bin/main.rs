@@ -7,7 +7,7 @@ use prism_lbs::{
     LbsConfig, OutputConfig, OutputFormat, PrecisionMode, PrismLbs, ProteinStructure,
     UnifiedDetector,
     graph::ProteinGraphBuilder,
-    output::write_publication_json,
+    output::{write_publication_json, write_provenance_metadata},
     pocket::filter_by_mode,
 };
 
@@ -198,7 +198,8 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
         json_path.set_extension("json");
         ensure_parent_dir(&json_path)?;
         let json_content = serde_json::to_string_pretty(&unified_output)?;
-        fs::write(&json_path, json_content)?;
+        fs::write(&json_path, &json_content)?;
+        let _ = write_provenance_metadata(&json_path, start_time, 1);
         log::info!("Wrote unified results to {:?}", json_path);
     } else if cli.pure_gpu {
         // PURE GPU DIRECT MODE: No graph construction, no CPU geometry
@@ -225,7 +226,8 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
                 ensure_parent_dir(&out_path)?;
                 match fmt {
                     OutputFormat::Pdb => {
-                        prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
+                        prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?;
+                        let _ = write_provenance_metadata(&out_path, start_time, 1);
                     }
                     OutputFormat::Json => {
                         if cli.publication {
@@ -238,8 +240,9 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
                                 None,
                             )?;
                         } else {
-                            prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                            prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?;
                         }
+                        let _ = write_provenance_metadata(&out_path, start_time, 1);
                     }
                     OutputFormat::Csv => {}
                 }
@@ -249,6 +252,7 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
                 pymol_path.set_extension("pml");
                 ensure_parent_dir(&pymol_path)?;
                 prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())?;
+                let _ = write_provenance_metadata(&pymol_path, start_time, 1);
             }
         }
         #[cfg(not(feature = "cuda"))]
@@ -284,7 +288,8 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
             ensure_parent_dir(&out_path)?;
             match fmt {
                 OutputFormat::Pdb => {
-                    prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
+                    prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?;
+                    let _ = write_provenance_metadata(&out_path, start_time, 1);
                 }
                 OutputFormat::Json => {
                     if cli.publication {
@@ -299,8 +304,9 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
                         )?;
                     } else {
                         // Legacy format for backward compatibility
-                        prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                        prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?;
                     }
+                    let _ = write_provenance_metadata(&out_path, start_time, 1);
                 }
                 OutputFormat::Csv => {}
             }
@@ -310,6 +316,7 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
             pymol_path.set_extension("pml");
             ensure_parent_dir(&pymol_path)?;
             prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())?;
+            let _ = write_provenance_metadata(&pymol_path, start_time, 1);
         }
     }
     Ok(())
@@ -385,6 +392,7 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
                                     let _ = prism_lbs::output::write_pdb_with_pockets(
                                         &out_path, &structure, &pockets,
                                     );
+                                    let _ = write_provenance_metadata(&out_path, start_time, 1);
                                 }
                                 OutputFormat::Json => {
                                     if use_publication {
@@ -403,6 +411,7 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
                                             &out_path, &structure, &pockets,
                                         );
                                     }
+                                    let _ = write_provenance_metadata(&out_path, start_time, 1);
                                 }
                                 OutputFormat::Csv => {}
                             }
@@ -414,6 +423,7 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
                         let _ = ensure_parent_dir(&pymol_path).and_then(|_| {
                             prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())
                         });
+                        let _ = write_provenance_metadata(&pymol_path, start_time, 1);
                     }
 
                     processed += 1;
