@@ -1,0 +1,229 @@
+# PRISM-LBS Continuous Integration Workflow
+# Runs on push to main and pull requests
+#
+# Jobs:
+#   - build: Compile with CUDA features
+#   - test: Run unit and integration tests
+#   - lint: Clippy and format checks
+#   - benchmark: Run validation suite (GPU required)
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CUDA_HOME: /usr/local/cuda
+
+jobs:
+  # =============================================================================
+  # Build Job (CPU-only compilation check)
+  # =============================================================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check compilation (no CUDA)
+        run: cargo check --workspace --exclude prism-gpu
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --exclude prism-gpu -- -D warnings
+
+  # =============================================================================
+  # Test Job (Unit tests)
+  # =============================================================================
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run unit tests
+        run: cargo test --workspace --exclude prism-gpu --exclude prism-lbs
+
+  # =============================================================================
+  # GPU Build Job (CUDA compilation)
+  # =============================================================================
+  build-cuda:
+    name: Build (CUDA)
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.6.0-devel-ubuntu22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl build-essential pkg-config libssl-dev git
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build with CUDA
+        run: |
+          source $HOME/.cargo/env
+          cargo build --release --features cuda -p prism-lbs
+        env:
+          CUDA_HOME: /usr/local/cuda
+
+      - name: Archive binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-lbs-linux-x86_64
+          path: target/release/prism-lbs
+
+  # =============================================================================
+  # GPU Validation Job (Requires self-hosted runner with GPU)
+  # =============================================================================
+  validate:
+    name: Validate (GPU)
+    needs: build-cuda
+    runs-on: [self-hosted, gpu]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: prism-lbs-linux-x86_64
+          path: ./bin
+
+      - name: Make executable
+        run: chmod +x ./bin/prism-lbs
+
+      - name: Verify GPU
+        run: nvidia-smi
+
+      - name: Run validation suite
+        run: |
+          export PATH=$PWD/bin:$PATH
+          export PRISM_PTX_PATH=$PWD/kernels/ptx
+          export RUST_LOG=info
+          bash scripts/prism_validation_suite_v2.1_aligned.sh
+        timeout-minutes: 30
+
+      - name: Upload validation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-results
+          path: |
+            benchmark/complete_validation/
+            *.log
+
+  # =============================================================================
+  # Docker Build Job
+  # =============================================================================
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: prism-lbs:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =============================================================================
+  # Release Job
+  # =============================================================================
+  release:
+    name: Create Release
+    needs: [build-cuda, validate]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: prism-lbs-linux-x86_64
+          path: ./release
+
+      - name: Download validation results
+        uses: actions/download-artifact@v4
+        with:
+          name: validation-results
+          path: ./validation
+
+      - name: Package release
+        run: |
+          mkdir -p release-package
+          cp release/prism-lbs release-package/
+          cp -r kernels/ptx release-package/
+          cp -r models release-package/
+          cp validation/*.md release-package/ 2>/dev/null || true
+          tar czf prism-lbs-${{ github.ref_name }}-linux-x86_64.tar.gz -C release-package .
+          sha256sum prism-lbs-*.tar.gz > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            prism-lbs-*.tar.gz
+            checksums.txt
+          body: |
+            ## PRISM-LBS Release ${{ github.ref_name }}
+
+            ### Installation
+            ```bash
+            tar xzf prism-lbs-${{ github.ref_name }}-linux-x86_64.tar.gz
+            ./prism-lbs --help
+            ```
+
+            ### Requirements
+            - NVIDIA GPU with CUDA 12.6+ support
+            - Linux x86_64
+
+            ### Validation Results
+            See attached validation report for benchmark performance.

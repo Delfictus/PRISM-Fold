@@ -201,10 +201,12 @@ while IFS='|' read -r apo_pdb holo_pdb protein_name cryptic_residues site_desc d
     
     ((TOTAL++)) || true
 
-    # Run PRISM
+    # Run PRISM (full GPU + unified detector)
     prism_output="$RESULTS_DIR/prism/${apo_pdb,,}.json"
     if [ -f "$PRISM_BIN" ]; then
-        $PRISM_BIN --batch --input "$apo_file" -o "$prism_output" 2>/dev/null || true
+        PRISM_PTX_DIR="${SCRIPT_DIR}/../../target/ptx" \
+        $PRISM_BIN --input "$apo_file" --output "$prism_output" \
+            --gpu-geometry --publication --unified 2>/dev/null || true
     fi
     
     # Run fpocket
