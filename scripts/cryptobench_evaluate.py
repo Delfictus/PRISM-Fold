@@ -32,7 +32,7 @@ import shutil
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-CRYPTOBENCH_DIR = PROJECT_ROOT / "benchmark" / "cryptobench"
+CRYPTOBENCH_DIR = PROJECT_ROOT / "benchmarks" / "datasets" / "cryptobench"
 
 
 @dataclass
@@ -510,8 +510,8 @@ def main():
         print("ERROR: CryptoBench dataset not found!")
         print(f"Expected at: {dataset_path}")
         print("\nTo download, run:")
-        print("  curl -sL 'https://osf.io/download/ta2ju/' -o benchmark/cryptobench/dataset.json")
-        print("  curl -sL 'https://osf.io/download/5s93p/' -o benchmark/cryptobench/folds.json")
+        print("  curl -sL 'https://osf.io/download/ta2ju/' -o benchmarks/datasets/cryptobench/dataset.json")
+        print("  curl -sL 'https://osf.io/download/5s93p/' -o benchmarks/datasets/cryptobench/folds.json")
         sys.exit(1)
 
     # Load ground truth

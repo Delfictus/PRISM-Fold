@@ -27,11 +27,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Paths
-LIGYSIS_DIR="$PROJECT_ROOT/benchmark/true_benchmarks/ligysis_true"
+LIGYSIS_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis"
 # Use ORIGINAL structures from RCSB (not transformed) for ground truth comparison
-PDB_DIR="$PROJECT_ROOT/benchmark/ligysis_structures"
+PDB_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis/structures"
 GROUND_TRUTH_PKL="$LIGYSIS_DIR/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl"
-RESULTS_DIR="$PROJECT_ROOT/benchmark/ligysis_results"
+RESULTS_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis/results"
 PRISM_BIN="$PROJECT_ROOT/target/release/prism-lbs"
 DOWNLOAD_SCRIPT="$SCRIPT_DIR/download_ligysis_structures.py"
 

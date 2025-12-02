@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Paths
-CRYPTOBENCH_DIR="$PROJECT_ROOT/benchmark/cryptobench"
+CRYPTOBENCH_DIR="$PROJECT_ROOT/benchmarks/datasets/cryptobench"
 PRISM_BIN="$PROJECT_ROOT/target/release/prism-lbs"
 EVAL_SCRIPT="$SCRIPT_DIR/cryptobench_evaluate.py"
 

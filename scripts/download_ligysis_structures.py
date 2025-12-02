@@ -10,7 +10,7 @@ Usage:
 
 Options:
   --quick    Download only first 100 structures for testing
-  --output   Output directory (default: benchmark/ligysis_structures)
+  --output   Output directory (default: benchmarks/datasets/ligysis/structures)
 """
 
 import os
@@ -47,10 +47,10 @@ def download_structure(pdb_id: str, chain: str, output_dir: Path) -> tuple:
 def main():
     parser = argparse.ArgumentParser(description='Download LIGYSIS structures from RCSB')
     parser.add_argument('--quick', action='store_true', help='Download only 100 structures')
-    parser.add_argument('--output', type=Path, default=Path('benchmark/ligysis_structures'),
+    parser.add_argument('--output', type=Path, default=Path('benchmarks/datasets/ligysis/structures'),
                         help='Output directory')
     parser.add_argument('--ground-truth', type=Path,
-                        default=Path('benchmark/true_benchmarks/ligysis_true/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl'),
+                        default=Path('benchmarks/datasets/ligysis/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl'),
                         help='Ground truth pickle file')
     parser.add_argument('--parallel', type=int, default=8, help='Parallel downloads')
     args = parser.parse_args()

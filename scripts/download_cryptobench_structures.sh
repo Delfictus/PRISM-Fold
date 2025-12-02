@@ -10,8 +10,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_ROOT/benchmark/cryptobench/structures/test"
-PDB_LIST="$PROJECT_ROOT/benchmark/cryptobench/pdb_ids_test.txt"
+OUTPUT_DIR="$PROJECT_ROOT/benchmarks/datasets/cryptobench/structures/test"
+PDB_LIST="$PROJECT_ROOT/benchmarks/datasets/cryptobench/pdb_ids_test.txt"
 
 echo "============================================================"
 echo "   CryptoBench Structure Downloader"
@@ -27,7 +27,7 @@ if [[ ! -f "$PDB_LIST" ]]; then
     echo "Generating PDB ID list from folds.json..."
     python3 -c "
 import json
-with open('$PROJECT_ROOT/benchmark/cryptobench/folds.json') as f:
+with open('$PROJECT_ROOT/benchmarks/datasets/cryptobench/folds.json') as f:
     folds = json.load(f)
 for pdb in folds['test']:
     print(pdb.lower())
