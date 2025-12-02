@@ -4,6 +4,8 @@ use crate::LbsError;
 #[cfg(feature = "cuda")]
 use prism_gpu::context::GpuContext;
 #[cfg(feature = "cuda")]
+use prism_gpu::global_context::GlobalGpuContext;
+#[cfg(feature = "cuda")]
 use prism_gpu::LbsGpu;
 
 use super::{distance, distance_squared, pdb_parser::ProteinStructure};
@@ -51,16 +53,19 @@ impl SurfaceComputer {
             .map(|a| (a.vdw_radius() + self.probe_radius) as f32)
             .collect();
 
-        let lbs_gpu = LbsGpu::new(gpu_ctx.device().clone(), &gpu_ctx.ptx_dir())
-            .map_err(|e| LbsError::Gpu(format!("Failed to init LbsGpu: {}", e)))?;
-        let (sasa, surface) = lbs_gpu
-            .surface_accessibility(
-                &coords,
-                &radii,
-                self.samples as i32,
-                self.probe_radius as f32,
-            )
-            .map_err(|e| LbsError::Gpu(format!("Surface kernel failed: {}", e)))?;
+        // Try to use pre-loaded LbsGpu from GlobalGpuContext (zero PTX overhead)
+        // Fall back to creating a new one if GlobalGpuContext isn't available
+        let (sasa, surface) = if let Some(lbs_gpu) = GlobalGpuContext::try_get().ok().and_then(|g| g.lbs_locked()) {
+            log::debug!("Using pre-loaded LbsGpu for surface computation (zero PTX overhead)");
+            lbs_gpu.surface_accessibility(&coords, &radii, self.samples as i32, self.probe_radius as f32)
+                .map_err(|e| LbsError::Gpu(format!("Surface kernel failed: {}", e)))?
+        } else {
+            log::debug!("GlobalGpuContext LbsGpu not available, creating new instance");
+            let lbs_gpu = LbsGpu::new(gpu_ctx.device().clone(), &gpu_ctx.ptx_dir())
+                .map_err(|e| LbsError::Gpu(format!("Failed to init LbsGpu: {}", e)))?;
+            lbs_gpu.surface_accessibility(&coords, &radii, self.samples as i32, self.probe_radius as f32)
+                .map_err(|e| LbsError::Gpu(format!("Surface kernel failed: {}", e)))?
+        };
 
         let mut max_center_distance: f64 = 0.0;
         structure.recompute_geometry();

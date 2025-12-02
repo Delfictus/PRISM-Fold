@@ -277,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_handler() {
-        let metrics = Arc::new(PrometheusMetrics::new().expect("Failed to create metrics"));
+        let metrics = PrometheusMetrics::new().expect("Failed to create metrics");
         let state = MetricsServerState { metrics };
 
         // Record some test metrics

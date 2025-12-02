@@ -5,7 +5,7 @@ use crate::LbsError;
 #[cfg(feature = "cuda")]
 use log::warn;
 #[cfg(feature = "cuda")]
-use prism_gpu::{context::GpuContext, LbsGpu};
+use prism_gpu::{context::GpuContext, global_context::GlobalGpuContext, LbsGpu};
 use serde::{Deserialize, Serialize};
 
 /// Graph construction parameters
@@ -113,29 +113,37 @@ impl ProteinGraphBuilder {
                     .filter_map(|&i| structure.atoms.get(i))
                     .map(|a| [a.coord[0] as f32, a.coord[1] as f32, a.coord[2] as f32])
                     .collect();
-                match LbsGpu::new(ctx.device().clone(), &ctx.ptx_dir()) {
-                    Ok(gpu) => match gpu.distance_matrix(&coords) {
-                        Ok(dist_mat) => {
-                            for i in 0..n {
-                                for j in (i + 1)..n {
-                                    let d = dist_mat[i * n + j] as f64;
-                                    if d <= self.config.distance_threshold {
-                                        let w = if self.config.weighted_edges {
-                                            1.0 - (d / self.config.distance_threshold)
-                                        } else {
-                                            1.0
-                                        };
-                                        adjacency[i].push(j);
-                                        adjacency[j].push(i);
-                                        edge_weights[i].push(w);
-                                        edge_weights[j].push(w);
-                                    }
+                // Try pre-loaded LbsGpu from GlobalGpuContext first (zero PTX overhead)
+                let gpu_result = if let Some(gpu) = GlobalGpuContext::try_get().ok().and_then(|g| g.lbs_locked()) {
+                    log::debug!("Using pre-loaded LbsGpu for distance matrix (zero PTX overhead)");
+                    gpu.distance_matrix(&coords)
+                } else {
+                    log::debug!("GlobalGpuContext LbsGpu not available, creating new instance");
+                    match LbsGpu::new(ctx.device().clone(), &ctx.ptx_dir()) {
+                        Ok(gpu) => gpu.distance_matrix(&coords),
+                        Err(e) => Err(e)
+                    }
+                };
+                match gpu_result {
+                    Ok(dist_mat) => {
+                        for i in 0..n {
+                            for j in (i + 1)..n {
+                                let d = dist_mat[i * n + j] as f64;
+                                if d <= self.config.distance_threshold {
+                                    let w = if self.config.weighted_edges {
+                                        1.0 - (d / self.config.distance_threshold)
+                                    } else {
+                                        1.0
+                                    };
+                                    adjacency[i].push(j);
+                                    adjacency[j].push(i);
+                                    edge_weights[i].push(w);
+                                    edge_weights[j].push(w);
                                 }
                             }
                         }
-                        Err(e) => warn!("GPU distance matrix failed; falling back to CPU: {}", e),
-                    },
-                    Err(e) => warn!("Failed to initialize LbsGpu; falling back to CPU: {}", e),
+                    }
+                    Err(e) => warn!("GPU distance matrix failed; falling back to CPU: {}", e),
                 }
             } else {
                 warn!("GPU graph requested but no GPU context provided; falling back to CPU");

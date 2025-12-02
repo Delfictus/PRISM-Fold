@@ -354,12 +354,12 @@ run_prism() {
     local extra_args=${3:-""}
 
     # Standard invocation - outputs JSON with pocket analysis
-    # Use --input/--output (standard mode with merging + expansion fixes)
-    # Full GPU acceleration with CUDA environment
+    # Full GPU acceleration with unified detector (geometric + softspot)
     CUDA_HOME=/usr/local/cuda-12.6 \
     PATH="/home/diddy/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/bin:$PATH" \
     PRISM_PTX_DIR="${PRISM_ROOT}/target/ptx" \
-    "$PRISM_BINARY" --input "$input_pdb" --output "$output_json" $extra_args 2>/dev/null
+    "$PRISM_BINARY" --input "$input_pdb" --output "$output_json" \
+        --gpu-geometry --publication --unified $extra_args 2>/dev/null
     
     # Verify output
     if [[ -f "$output_json" ]] && [[ -s "$output_json" ]]; then

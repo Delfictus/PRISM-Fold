@@ -675,10 +675,15 @@ fn render_convergence_chart(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render protein structure (biomolecular mode)
 fn render_protein_structure(app: &App, frame: &mut Frame, area: Rect) {
+    let title = if app.protein.name.is_empty() {
+        " Protein Structure ".to_string()
+    } else {
+        format!(" {} ", app.protein.name)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::panel_border())
-        .title(Span::styled(" Protein Structure ", Theme::panel_title()));
+        .title(Span::styled(title, Theme::panel_title()));
 
     let structure = vec![
         Line::from(""),
@@ -749,7 +754,25 @@ fn render_protein_structure(app: &App, frame: &mut Frame, area: Rect) {
         ]),
     ];
 
-    let widget = Paragraph::new(structure).block(block);
+    // Add real protein statistics at bottom if available
+    let mut final_structure = structure;
+    if app.protein.residue_count > 0 {
+        final_structure.push(Line::from(""));
+        final_structure.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                format!(
+                    "{} residues │ {} atoms │ {} chains",
+                    app.protein.residue_count,
+                    app.protein.atom_count,
+                    app.protein.chain_count
+                ),
+                Style::default().fg(Theme::TEXT_DIM)
+            ),
+        ]));
+    }
+
+    let widget = Paragraph::new(final_structure).block(block);
     frame.render_widget(widget, area);
 }
 
@@ -758,28 +781,99 @@ fn render_pocket_analysis(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::panel_border())
-        .title(Span::styled(" Binding Pocket Analysis ", Theme::panel_title()));
+        .title(Span::styled(
+            format!(" Detected Pockets ({}) ", app.protein.pockets.len()),
+            Theme::panel_title()
+        ));
 
-    let analysis = vec![
-        Line::from(""),
-        Line::from("  Volume:    486 Å³     Depth: 12.4 Å"),
-        Line::from("  Enclosure: 0.73"),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("  Hydrophobic: "),
-            Span::styled("████████", Style::default().fg(Theme::PHARM_HYDROPHOBIC)),
-            Span::styled("░░", Style::default().fg(Theme::TEXT_DIM)),
-            Span::raw(" 76%"),
-        ]),
-        Line::from("  H-bond sites: 8      Metal: Mg²⁺"),
-        Line::from(vec![
-            Span::raw("  Druggability: "),
-            Span::styled("██████████", Style::default().fg(Theme::SUCCESS)),
-            Span::raw(" 94%"),
-        ]),
-    ];
+    let mut lines = vec![];
 
-    let widget = Paragraph::new(analysis).block(block);
+    if app.protein.pockets.is_empty() {
+        // Show LBS progress if detection is ongoing
+        if let Some(ref phase) = app.protein.lbs_progress.current_phase {
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!("  Phase: {}", phase)));
+            lines.push(Line::from(format!(
+                "  Progress: {}/{}",
+                app.protein.lbs_progress.phase_iteration,
+                app.protein.lbs_progress.phase_max_iterations
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!(
+                "  Pockets found: {}",
+                app.protein.lbs_progress.pockets_detected
+            )));
+            if app.protein.lbs_progress.best_druggability > 0.0 {
+                lines.push(Line::from(format!(
+                    "  Best druggability: {:.3}",
+                    app.protein.lbs_progress.best_druggability
+                )));
+            }
+            if app.protein.lbs_progress.gpu_accelerated {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::raw("  GPU: "),
+                    Span::styled("ACTIVE", Style::default().fg(Theme::SUCCESS)),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(""));
+            lines.push(Line::from("  No pockets detected yet"));
+            lines.push(Line::from(""));
+            lines.push(Line::from("  Awaiting structure load..."));
+        }
+    } else {
+        // Show top 5 pockets with real data
+        for (i, pocket) in app.protein.pockets.iter().take(5).enumerate() {
+            if i > 0 {
+                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(""));
+
+            // Pocket header
+            let drug_color = if pocket.druggability > 0.8 {
+                Theme::SUCCESS
+            } else if pocket.druggability > 0.5 {
+                Theme::WARNING
+            } else {
+                Theme::TEXT_DIM
+            };
+
+            lines.push(Line::from(vec![
+                Span::raw(format!("  #{} ", pocket.id)),
+                Span::styled(
+                    format!("Vol: {:.1}Å³  Drug: {:.2}", pocket.volume, pocket.druggability),
+                    Style::default().fg(drug_color).bold()
+                ),
+            ]));
+
+            // Druggability bar
+            let bar_len = (pocket.druggability * 10.0) as usize;
+            let bar = "█".repeat(bar_len) + &"░".repeat(10 - bar_len);
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled(bar, Style::default().fg(drug_color)),
+            ]));
+
+            // Residues (show first 5)
+            let residue_list: String = pocket.residues.iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let residue_display = if pocket.residues.len() > 5 {
+                format!("{}...", residue_list)
+            } else {
+                residue_list
+            };
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled(residue_display, Style::default().fg(Theme::TEXT_DIM)),
+            ]));
+        }
+    }
+
+    let widget = Paragraph::new(lines).block(block);
     frame.render_widget(widget, area);
 }
 
@@ -790,18 +884,31 @@ fn render_gnn_attention(app: &App, frame: &mut Frame, area: Rect) {
         .border_style(Theme::panel_border())
         .title(Span::styled(" GNN Attention Map ", Theme::panel_title()));
 
-    let residues = [
-        ("ASP168", 0.94),
-        ("LYS52", 0.71),
-        ("GLU71", 0.52),
-        ("VAL123", 0.41),
-    ];
-
     let mut lines = vec![Line::from("")];
-    for (res, attn) in residues {
-        let bar_len = (attn * 20.0) as usize;
-        let bar = "█".repeat(bar_len) + &"░".repeat(20 - bar_len);
-        lines.push(Line::from(format!("  {} {} {:.2}", res, bar, attn)));
+
+    if app.protein.gnn_attention.is_empty() {
+        lines.push(Line::from("  No GNN data available"));
+        lines.push(Line::from(""));
+        lines.push(Line::from("  Run prediction to see"));
+        lines.push(Line::from("  residue importance"));
+    } else {
+        // Show top attention scores from real data
+        for (res, attn) in app.protein.gnn_attention.iter().take(4) {
+            let bar_len = (attn * 20.0) as usize;
+            let bar = "█".repeat(bar_len) + &"░".repeat(20 - bar_len);
+            let color = if *attn > 0.8 {
+                Theme::SUCCESS
+            } else if *attn > 0.5 {
+                Theme::WARNING
+            } else {
+                Theme::TEXT_DIM
+            };
+            lines.push(Line::from(vec![
+                Span::raw(format!("  {:8} ", res)),
+                Span::styled(bar, Style::default().fg(color)),
+                Span::raw(format!(" {:.2}", attn)),
+            ]));
+        }
     }
 
     let widget = Paragraph::new(lines).block(block);

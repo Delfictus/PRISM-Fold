@@ -374,6 +374,105 @@ impl ReactiveController {
             }
 
             // ═══════════════════════════════════════════════════════════════
+            // LBS Events (Biomolecular Mode)
+            // ═══════════════════════════════════════════════════════════════
+
+            PrismEvent::ProteinLoaded { pdb_id, residues, atoms, chains } => {
+                // Update protein state
+                app.protein.name = pdb_id.clone();
+                app.protein.residue_count = residues;
+                app.protein.atom_count = atoms;
+                app.protein.chain_count = chains;
+
+                app.dialogue.add_system_message(&format!(
+                    "Protein loaded: {} ({} residues, {} atoms, {} chains)",
+                    pdb_id, residues, atoms, chains
+                ));
+            }
+
+            PrismEvent::LbsPhaseStarted { phase, name } => {
+                // Update LBS progress
+                app.protein.lbs_progress.current_phase = Some(name.clone());
+                app.protein.lbs_progress.phase_iteration = 0;
+                app.protein.lbs_progress.phase_max_iterations = 1000; // Default, will be updated
+
+                app.dialogue.add_system_message(&format!("LBS: Starting {}...", name));
+            }
+
+            PrismEvent::LbsPhaseProgress { phase, iteration, max_iterations, pockets_found, best_druggability } => {
+                // Update LBS progress in real-time
+                app.protein.lbs_progress.phase_iteration = iteration;
+                app.protein.lbs_progress.phase_max_iterations = max_iterations;
+                app.protein.lbs_progress.pockets_detected = pockets_found;
+                app.protein.lbs_progress.best_druggability = best_druggability;
+
+                log::debug!(
+                    "LBS {:?}: {}/{} - {} pockets, best druggability: {:.2}",
+                    phase, iteration, max_iterations, pockets_found, best_druggability
+                );
+            }
+
+            PrismEvent::LbsPhaseCompleted { phase, duration_ms, pockets_found } => {
+                app.dialogue.add_system_message(&format!(
+                    "LBS {:?} completed in {:.2}s: {} pockets found",
+                    phase, duration_ms as f64 / 1000.0, pockets_found
+                ));
+            }
+
+            PrismEvent::PocketDetected { pocket_id, volume, druggability, center, residue_count } => {
+                use super::app::PocketInfo;
+
+                // Add pocket to the app state (convert f32 to f64)
+                app.protein.pockets.push(PocketInfo {
+                    id: pocket_id,
+                    volume: volume as f64,
+                    depth: 0.0, // Will be updated if available
+                    druggability: druggability as f64,
+                    center: [center[0] as f64, center[1] as f64, center[2] as f64],
+                    residues: vec![], // Will be filled later if available
+                    hydrophobicity: 0.0,
+                    enclosure: 0.0,
+                });
+
+                // Sort by druggability (highest first)
+                app.protein.pockets.sort_by(|a, b| {
+                    b.druggability.partial_cmp(&a.druggability).unwrap()
+                });
+
+                app.dialogue.add_system_message(&format!(
+                    "Pocket #{}: volume={:.1}Å³, druggability={:.2}, {} residues at ({:.1}, {:.1}, {:.1})",
+                    pocket_id, volume, druggability, residue_count, center[0], center[1], center[2]
+                ));
+            }
+
+            PrismEvent::LbsPredictionComplete { total_pockets, best_pocket_druggability, total_duration_ms, gpu_accelerated } => {
+                // Clear current phase to show completion
+                app.protein.lbs_progress.current_phase = None;
+                app.protein.lbs_progress.gpu_accelerated = gpu_accelerated;
+
+                app.dialogue.add_system_message(&format!(
+                    "LBS prediction complete: {} pockets (best: {:.2} druggability) in {:.2}s {}",
+                    total_pockets, best_pocket_druggability, total_duration_ms as f64 / 1000.0,
+                    if gpu_accelerated { "[GPU]" } else { "[CPU]" }
+                ));
+            }
+
+            PrismEvent::GnnInference { num_nodes, num_edges, chromatic_prediction, confidence, gpu_used, latency_ms } => {
+                log::debug!(
+                    "GNN inference: {} nodes, {} edges -> {} colors (conf: {:.2}) in {}ms {}",
+                    num_nodes, num_edges, chromatic_prediction, confidence, latency_ms,
+                    if gpu_used { "[GPU]" } else { "[CPU]" }
+                );
+            }
+
+            PrismEvent::SasaComputed { num_atoms, exposed_area, buried_area, latency_ms } => {
+                log::debug!(
+                    "SASA computed for {} atoms: exposed={:.1}Å², buried={:.1}Å² in {}ms",
+                    num_atoms, exposed_area, buried_area, latency_ms
+                );
+            }
+
+            // ═══════════════════════════════════════════════════════════════
             // System Events
             // ═══════════════════════════════════════════════════════════════
 

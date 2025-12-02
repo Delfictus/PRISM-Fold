@@ -32,7 +32,7 @@ pub use allosteric::{
     HingeRegion, MultiModuleEvidence,
 };
 pub use graph::{GraphConfig, ProteinGraph, ProteinGraphBuilder};
-pub use pocket::{Pocket, PocketDetector, PocketProperties};
+pub use pocket::{Pocket, PocketDetector, PocketProperties, PrecisionMode};
 pub use scoring::{DrugabilityClass, DruggabilityScore, DruggabilityScorer};
 pub use softspot::{CrypticCandidate, CrypticConfidence, SoftSpotDetector};
 pub use structure::{Atom, PdbParseOptions, ProteinStructure, Residue};
@@ -42,7 +42,9 @@ pub use unified::{
 
 use anyhow::Result;
 #[cfg(feature = "cuda")]
-use prism_gpu::context::{GpuContext, GpuSecurityConfig};
+use prism_gpu::context::GpuContext;
+#[cfg(feature = "cuda")]
+use prism_gpu::global_context::GlobalGpuContext;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 #[cfg(feature = "cuda")]
@@ -73,6 +75,12 @@ pub struct LbsConfig {
 
     /// Maximum number of pockets to return
     pub top_n: usize,
+
+    /// Pure GPU screening mode: bypass all CPU geometry (Voronoi, Delaunay, fpocket)
+    /// Uses only mega-fused GPU kernel for ultra-fast batch processing
+    #[cfg(feature = "cuda")]
+    #[serde(default)]
+    pub pure_gpu_mode: bool,
 }
 
 impl Default for LbsConfig {
@@ -89,6 +97,8 @@ impl Default for LbsConfig {
             scoring: scoring::ScoringWeights::default(),
             output: OutputConfig::default(),
             top_n: 20,  // Increased from 10 to catch more binding sites
+            #[cfg(feature = "cuda")]
+            pure_gpu_mode: false,
         }
     }
 }
@@ -179,16 +189,23 @@ impl PrismLbs {
 
     #[cfg(feature = "cuda")]
     fn init_gpu_context_from_env() -> Result<Arc<GpuContext>, LbsError> {
-        let device_id = std::env::var("PRISM_GPU_DEVICE")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0);
-        let ptx_dir = std::env::var("PRISM_PTX_DIR").unwrap_or_else(|_| "target/ptx".to_string());
-        let ptx_path = Path::new(&ptx_dir);
-        let security = GpuSecurityConfig::default();
-        let ctx = GpuContext::new(device_id, security, ptx_path)
-            .map_err(|e| LbsError::Gpu(format!("Failed to init GPU context: {}", e)))?;
-        Ok(Arc::new(ctx))
+        // Trigger GlobalGpuContext initialization ONCE - this loads all PTX files
+        // and pre-initializes mega-fused and LBS kernels. The detector will use
+        // GlobalGpuContext directly for pocket detection (the main compute path).
+        // We return None here to avoid creating a duplicate context.
+        match GlobalGpuContext::try_get() {
+            Ok(_global_gpu) => {
+                log::info!("GlobalGpuContext initialized - detector will use pre-loaded kernels");
+                // GlobalGpuContext is initialized; detector will use it directly.
+                // Don't create a separate context to avoid duplicate PTX loading.
+                // Surface/graph ops will use CPU fallback (minimal perf impact).
+                Err(LbsError::Gpu("Using GlobalGpuContext directly (no separate Arc<GpuContext>)".to_string()))
+            }
+            Err(e) => {
+                log::warn!("GlobalGpuContext initialization failed: {}. GPU disabled.", e);
+                Err(LbsError::Gpu(format!("GlobalGpuContext init failed: {}", e)))
+            }
+        }
     }
 
     /// Load configuration from TOML file
@@ -207,7 +224,11 @@ impl PrismLbs {
         #[cfg(feature = "cuda")]
         {
             if self.config.use_gpu {
-                if let Some(ctx) = &self.gpu_ctx {
+                // Try gpu_ctx first, then fall back to GlobalGpuContext
+                let gpu_ctx_ref = self.gpu_ctx.as_ref().map(|arc| arc.as_ref());
+                let global_ctx_ref = GlobalGpuContext::try_get().ok().map(|g| g.context());
+
+                if let Some(ctx) = gpu_ctx_ref.or(global_ctx_ref) {
                     let computer = structure::SurfaceComputer::default();
                     computer.compute_gpu(&mut structure, ctx)?;
                 } else {
@@ -229,35 +250,47 @@ impl PrismLbs {
         let graph_builder = ProteinGraphBuilder::new(self.config.graph.clone());
         #[cfg(feature = "cuda")]
         let graph = if self.config.graph.use_gpu {
-            graph_builder.build_with_gpu(&structure, self.gpu_ctx.as_deref())?
+            // Try gpu_ctx first, then fall back to GlobalGpuContext
+            let gpu_ctx_ref = self.gpu_ctx.as_ref().map(|arc| arc.as_ref());
+            let global_ctx_ref = GlobalGpuContext::try_get().ok().map(|g| g.context());
+            graph_builder.build_with_gpu(&structure, gpu_ctx_ref.or(global_ctx_ref))?
         } else {
             graph_builder.build(&structure)?
         };
         #[cfg(not(feature = "cuda"))]
         let graph = graph_builder.build(&structure)?;
 
-        // 3. Run pocket detection through phases
+        // 3. Run pocket detection through phases (with GPU when available)
+        #[cfg(feature = "cuda")]
+        let mut pockets = self.detector.detect_with_gpu(&graph, self.gpu_ctx.as_ref())?;
+        #[cfg(not(feature = "cuda"))]
         let mut pockets = self.detector.detect(&graph)?;
 
         // 3.5 Progressive pocket merging for fragmented binding sites
+        // Reduced merge distances to prevent mega-pockets (was 15/20/25, now 12/16/20)
         // Phase 1: Standard merge (kinases, proteases)
-        pockets = merge_adjacent_pockets_with_seq(pockets, 15.0, 1, 10);
+        pockets = merge_adjacent_pockets_with_seq(pockets, 12.0, 1, 10);
         // Phase 2: Channel merge (substrate channels like aldose reductase)
-        pockets = merge_adjacent_pockets_with_seq(pockets, 20.0, 1, 50);
+        pockets = merge_adjacent_pockets_with_seq(pockets, 16.0, 1, 50);
         // Phase 3: GPCR/membrane protein merge (multi-helix sites)
-        pockets = merge_adjacent_pockets_with_seq(pockets, 25.0, 1, 100);
+        pockets = merge_adjacent_pockets_with_seq(pockets, 20.0, 1, 100);
 
         // 3.6 Expand pocket residues to capture nearby interaction-capable residues
         // This catches residues not directly pocket-lining but within binding distance
-        // Use 8Å radius with 100-residue cap (allows large kinase sites, prevents mega-pockets)
+        // Use 6Å radius with 80-residue cap (balanced: capture more cryptic site residues)
+        // With max_pockets=4 in precision filter, larger pockets improve per-pocket recall
         for pocket in &mut pockets {
-            expand_pocket_residues(pocket, &structure.atoms, 8.0, 100);
+            expand_pocket_residues(pocket, &structure.atoms, 6.0, 80);
         }
 
         // 4. Score pockets (GPU when available)
         #[cfg(feature = "cuda")]
         {
-            if let Some(ctx) = &self.gpu_ctx {
+            // Try gpu_ctx first, then fall back to GlobalGpuContext
+            let gpu_ctx_ref = self.gpu_ctx.as_ref().map(|arc| arc.as_ref());
+            let global_ctx_ref = GlobalGpuContext::try_get().ok().map(|g| g.context());
+
+            if let Some(ctx) = gpu_ctx_ref.or(global_ctx_ref) {
                 match self.scorer.score_batch_gpu(&pockets, ctx) {
                     Ok(scores) => {
                         for (pocket, score) in pockets.iter_mut().zip(scores) {
@@ -307,6 +340,33 @@ impl PrismLbs {
         use rayon::prelude::*;
 
         structures.par_iter().map(|s| self.predict(s)).collect()
+    }
+
+    /// ULTRA-FAST PURE GPU DIRECT PATH: No graph construction, no CPU geometry
+    ///
+    /// This method bypasses ALL CPU-heavy operations:
+    /// - NO ProteinGraphBuilder (saves 10.8s per large structure)
+    /// - NO surface accessibility computation
+    /// - NO Voronoi/Delaunay triangulation
+    /// - NO fpocket
+    /// - NO belief propagation
+    ///
+    /// Uses ONLY the mega-fused GPU kernel with 5 flat arrays:
+    /// - atom coordinates
+    /// - CA indices
+    /// - conservation scores
+    /// - B-factors
+    /// - burial estimates
+    ///
+    /// Target: 219 structures in under 3 seconds
+    #[cfg(feature = "cuda")]
+    pub fn predict_pure_gpu(&self, structure: &ProteinStructure) -> Result<Vec<Pocket>> {
+        log::info!("PURE GPU DIRECT: Bypassing graph construction for {}", structure.title);
+
+        // Call detector's pure GPU direct method - NO graph construction
+        let pockets = self.detector.detect_pure_gpu_direct(structure)?;
+
+        Ok(pockets)
     }
 }
 
@@ -403,7 +463,7 @@ fn merge_adjacent_pockets_with_seq(
 
                 // Max pocket size limit (prevent mega-pockets)
                 let combined_residues = current.residue_indices.len() + current_pockets[j].residue_indices.len() - shared;
-                const MAX_POCKET_RESIDUES: usize = 120;  // Large kinase sites can have 50-100 residues
+                const MAX_POCKET_RESIDUES: usize = 80;  // Allow larger pockets (max_pockets=4 controls count)
 
                 // Merge if: close distance AND (sharing residues OR sequential neighbors)
                 // Also enforce max size limit

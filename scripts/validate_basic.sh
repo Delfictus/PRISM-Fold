@@ -217,11 +217,15 @@ run_test() {
     # Run PRISM if result doesn't exist or is older than binary
     if [ ! -f "$result_file" ] || [ "$PRISM_BIN" -nt "$result_file" ]; then
         if [ -f "$PRISM_BIN" ]; then
-            # Use --batch mode with --input and -o for output
-            $PRISM_BIN --batch --input "$pdb_file" -o "$result_file" 2>/dev/null || true
+            # Full GPU acceleration with unified detector
+            PRISM_PTX_DIR="$PROJECT_DIR/target/ptx" \
+            $PRISM_BIN --input "$pdb_file" --output "$result_file" \
+                --gpu-geometry --publication --unified 2>/dev/null || true
         else
-            # Fallback: try cargo run
-            (cd "$PROJECT_DIR" && cargo run --release -- --batch --input "$pdb_file" -o "$result_file" 2>/dev/null) || true
+            # Fallback: try cargo run with full flags
+            PRISM_PTX_DIR="$PROJECT_DIR/target/ptx" \
+            (cd "$PROJECT_DIR" && cargo run --release -- --input "$pdb_file" --output "$result_file" \
+                --gpu-geometry --publication --unified 2>/dev/null) || true
         fi
     fi
 

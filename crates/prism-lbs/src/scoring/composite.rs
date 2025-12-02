@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cuda")]
-use prism_gpu::{context::GpuContext, LbsGpu};
+use prism_gpu::{context::GpuContext, global_context::GlobalGpuContext, LbsGpu};
 #[cfg(feature = "cuda")]
 use std::sync::Arc;
 
@@ -210,12 +210,20 @@ impl DruggabilityScorer {
             self.weights.topology as f32,
         ];
 
-        let lbs_gpu = LbsGpu::new(gpu_ctx.device().clone(), &gpu_ctx.ptx_dir())
-            .map_err(|e| crate::LbsError::Gpu(format!("Failed to init LbsGpu: {}", e)))?;
-
-        let gpu_scores = lbs_gpu.druggability_score(
-            &volume, &hydro, &enclosure, &depth, &hbond, &flex, &cons, &topo, weights
-        ).map_err(|e| crate::LbsError::Gpu(format!("GPU scoring failed: {}", e)))?;
+        // Try to use pre-loaded LbsGpu from GlobalGpuContext (zero PTX overhead)
+        let gpu_scores = if let Some(lbs_gpu) = GlobalGpuContext::try_get().ok().and_then(|g| g.lbs_locked()) {
+            log::debug!("Using pre-loaded LbsGpu for druggability scoring (zero PTX overhead)");
+            lbs_gpu.druggability_score(
+                &volume, &hydro, &enclosure, &depth, &hbond, &flex, &cons, &topo, weights
+            )
+        } else {
+            log::debug!("GlobalGpuContext LbsGpu not available, creating new instance");
+            let lbs_gpu = LbsGpu::new(gpu_ctx.device().clone(), &gpu_ctx.ptx_dir())
+                .map_err(|e| crate::LbsError::Gpu(format!("Failed to init LbsGpu: {}", e)))?;
+            lbs_gpu.druggability_score(
+                &volume, &hydro, &enclosure, &depth, &hbond, &flex, &cons, &topo, weights
+            )
+        }.map_err(|e| crate::LbsError::Gpu(format!("GPU scoring failed: {}", e)))?;
 
         // Assemble results with components
         let mut results = Vec::with_capacity(n);

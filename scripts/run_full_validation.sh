@@ -178,9 +178,11 @@ if [ -n "$RIBOSOME_PDB" ] && [ -f "$RIBOSOME_PDB" ]; then
     PRISM_BIN="$PROJECT_DIR/target/release/prism"
 
     if [ -f "$PRISM_BIN" ]; then
-        echo -e "${BLUE}[INFO] Timing PRISM...${NC}"
+        echo -e "${BLUE}[INFO] Timing PRISM (full GPU + unified)...${NC}"
         PRISM_START=$(date +%s.%N)
-        timeout 300 $PRISM_BIN --batch --input "$RIBOSOME_PDB" -o "$SPEED_DIR/ribosome_prism.json" 2>/dev/null || true
+        PRISM_PTX_DIR="$PROJECT_DIR/target/ptx" \
+        timeout 300 $PRISM_BIN --input "$RIBOSOME_PDB" --output "$SPEED_DIR/ribosome_prism.json" \
+            --gpu-geometry --publication --unified 2>/dev/null || true
         PRISM_END=$(date +%s.%N)
         PRISM_TIME=$(echo "$PRISM_END - $PRISM_START" | bc)
         echo -e "  PRISM: ${PRISM_TIME}s"

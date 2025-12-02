@@ -1,11 +1,14 @@
 use clap::{ArgAction, Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use prism_lbs::{
-    LbsConfig, OutputConfig, OutputFormat, PrismLbs, ProteinStructure,
-    UnifiedDetector, UnifiedOutput, Pocket,
+    LbsConfig, OutputConfig, OutputFormat, PrecisionMode, PrismLbs, ProteinStructure,
+    UnifiedDetector,
     graph::ProteinGraphBuilder,
+    output::write_publication_json,
+    pocket::filter_by_mode,
 };
 
 #[derive(Parser)]
@@ -60,6 +63,18 @@ struct Cli {
     #[arg(long, action = ArgAction::SetTrue, conflicts_with = "unified")]
     softspot_only: bool,
 
+    /// Use publication-ready output format (Nature Communications standard)
+    #[arg(long, action = ArgAction::SetTrue)]
+    publication: bool,
+
+    /// Precision mode for pocket filtering: high_recall, balanced (default), high_precision
+    #[arg(long, default_value = "balanced")]
+    precision: String,
+
+    /// Ultra-fast screening: use only mega-fused GPU kernel, skip all CPU geometry
+    #[arg(long, action = ArgAction::SetTrue)]
+    pure_gpu: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -108,6 +123,11 @@ fn main() -> anyhow::Result<()> {
     if let Some(top) = cli.top_n {
         config.top_n = top;
     }
+
+    #[cfg(feature = "cuda")]
+    if cli.pure_gpu {
+        config.pure_gpu_mode = true;
+    }
     if let Some(ref fmt) = cli.format {
         let fmts = fmt
             .split(',')
@@ -134,6 +154,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
+    let start_time = Instant::now();
     let mut structure = ProteinStructure::from_pdb_file(&cli.input)?;
     let base = resolve_output_base(&cli.output, &cli.input);
 
@@ -179,10 +200,73 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
         let json_content = serde_json::to_string_pretty(&unified_output)?;
         fs::write(&json_path, json_content)?;
         log::info!("Wrote unified results to {:?}", json_path);
+    } else if cli.pure_gpu {
+        // PURE GPU DIRECT MODE: No graph construction, no CPU geometry
+        #[cfg(feature = "cuda")]
+        {
+            log::info!("PURE GPU DIRECT MODE: Bypassing graph construction entirely");
+            let predictor = PrismLbs::new(config.clone())?;
+            let pockets = predictor.predict_pure_gpu(&structure)?;
+            let processing_time_ms = start_time.elapsed().as_millis() as u64;
+
+            for fmt in &config.output.formats {
+                let mut out_path = base.clone();
+                match fmt {
+                    OutputFormat::Pdb => {
+                        out_path.set_extension("pdb");
+                    }
+                    OutputFormat::Json => {
+                        out_path.set_extension("json");
+                    }
+                    OutputFormat::Csv => {
+                        out_path.set_extension("csv");
+                    }
+                }
+                ensure_parent_dir(&out_path)?;
+                match fmt {
+                    OutputFormat::Pdb => {
+                        prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
+                    }
+                    OutputFormat::Json => {
+                        if cli.publication {
+                            write_publication_json(
+                                &out_path,
+                                &pockets,
+                                &structure,
+                                processing_time_ms,
+                                config.use_gpu,
+                                None,
+                            )?;
+                        } else {
+                            prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                        }
+                    }
+                    OutputFormat::Csv => {}
+                }
+            }
+            if config.output.include_pymol_script {
+                let mut pymol_path = base.clone();
+                pymol_path.set_extension("pml");
+                ensure_parent_dir(&pymol_path)?;
+                prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())?;
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            anyhow::bail!("--pure-gpu requires CUDA feature to be enabled");
+        }
     } else {
         // Standard geometric mode
         let predictor = PrismLbs::new(config.clone())?;
-        let pockets = predictor.predict(&structure)?;
+        let raw_pockets = predictor.predict(&structure)?;
+        let processing_time_ms = start_time.elapsed().as_millis() as u64;
+
+        // Apply precision filtering based on CLI flag
+        let precision_mode = PrecisionMode::from_str(&cli.precision)
+            .unwrap_or(PrecisionMode::Balanced);
+        let (pockets, filter_stats) = filter_by_mode(raw_pockets, precision_mode);
+        log::info!("Precision filter ({}): {} -> {} pockets",
+            precision_mode, filter_stats.input_count, filter_stats.output_count);
 
         for fmt in &config.output.formats {
             let mut out_path = base.clone();
@@ -203,7 +287,20 @@ fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
                     prism_lbs::output::write_pdb_with_pockets(&out_path, &structure, &pockets)?
                 }
                 OutputFormat::Json => {
-                    prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                    if cli.publication {
+                        // Publication-ready format with all required fields
+                        write_publication_json(
+                            &out_path,
+                            &pockets,
+                            &structure,
+                            processing_time_ms,
+                            config.use_gpu,
+                            None, // GPU name - could be detected
+                        )?;
+                    } else {
+                        // Legacy format for backward compatibility
+                        prism_lbs::output::write_json_results(&out_path, &structure, &pockets)?
+                    }
                 }
                 OutputFormat::Csv => {}
             }
@@ -223,25 +320,52 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
         fs::create_dir_all(&cli.output)?;
     }
 
-    let mut results = Vec::new();
+    let mut pdb_files = Vec::new();
     for entry in std::fs::read_dir(&cli.input)? {
         let entry = entry?;
         if entry.file_type()?.is_file() {
             let path = entry.path();
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
                 if ext.eq_ignore_ascii_case("pdb") {
-                    results.push(path);
+                    pdb_files.push(path);
                 }
             }
         }
     }
 
+    log::info!("Found {} PDB files to process", pdb_files.len());
+    let use_publication = cli.publication;
+    let use_gpu = config.use_gpu;
+    let use_pure_gpu = cli.pure_gpu;
+    let precision_mode = PrecisionMode::from_str(&cli.precision)
+        .unwrap_or(PrecisionMode::Balanced);
+
     let predictor = PrismLbs::new(config.clone())?;
-    results.chunks(parallel.max(1)).for_each(|batch| {
+    let total = pdb_files.len();
+    let mut processed = 0usize;
+
+    pdb_files.chunks(parallel.max(1)).for_each(|batch| {
         for path in batch {
+            let start_time = Instant::now();
             if let Ok(structure) = ProteinStructure::from_pdb_file(path) {
-                if let Ok(pockets) = predictor.predict(&structure) {
+                // Choose prediction path based on pure_gpu flag
+                #[cfg(feature = "cuda")]
+                let pockets_result: Result<Vec<_>, _> = if use_pure_gpu {
+                    // PURE GPU DIRECT MODE: No graph construction
+                    predictor.predict_pure_gpu(&structure).map_err(|e| e.into())
+                } else {
+                    // Standard mode with graph construction
+                    predictor.predict(&structure)
+                        .map(|raw| filter_by_mode(raw, precision_mode).0)
+                };
+                #[cfg(not(feature = "cuda"))]
+                let pockets_result: Result<Vec<_>, _> = predictor.predict(&structure)
+                    .map(|raw| filter_by_mode(raw, precision_mode).0);
+
+                if let Ok(pockets) = pockets_result {
+                    let processing_time_ms = start_time.elapsed().as_millis() as u64;
                     let base = resolve_output_base(&cli.output, path);
+
                     for fmt in &config.output.formats {
                         let mut out_path = base.clone();
                         match fmt {
@@ -263,9 +387,22 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
                                     );
                                 }
                                 OutputFormat::Json => {
-                                    let _ = prism_lbs::output::write_json_results(
-                                        &out_path, &structure, &pockets,
-                                    );
+                                    if use_publication {
+                                        // Publication-ready format with all required fields
+                                        let _ = write_publication_json(
+                                            &out_path,
+                                            &pockets,
+                                            &structure,
+                                            processing_time_ms,
+                                            use_gpu,
+                                            None, // GPU name
+                                        );
+                                    } else {
+                                        // Legacy format for backward compatibility
+                                        let _ = prism_lbs::output::write_json_results(
+                                            &out_path, &structure, &pockets,
+                                        );
+                                    }
                                 }
                                 OutputFormat::Csv => {}
                             }
@@ -278,10 +415,17 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
                             prism_lbs::output::write_pymol_script(&pymol_path, pockets.len())
                         });
                     }
+
+                    processed += 1;
+                    if processed % 100 == 0 || processed == total {
+                        log::info!("Processed {}/{} structures", processed, total);
+                    }
                 }
             }
         }
     });
+
+    log::info!("Batch processing complete: {} structures processed", processed);
     Ok(())
 }
 

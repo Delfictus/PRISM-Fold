@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
             if let Some(case) = cases.iter().find(|c| c.name == stem) {
                 let structure = ProteinStructure::from_pdb_file(&pdb)?;
                 let pockets = predictor.predict(&structure)?;
-                let metrics = prism_lbs::validation::ValidationMetrics::compute(
+                let metrics = prism_lbs::validation::ValidationMetrics::compute_batch(
                     &pockets,
                     &case.ligand_coords,
                     case.threshold,
@@ -56,7 +56,7 @@ fn main() -> anyhow::Result<()> {
                 log::info!(
                     "PDB {}: center_dist={:.2}Å coverage={:.2} precision={:.2}",
                     stem,
-                    metrics.center_distance,
+                    metrics.center_distance(),
                     metrics.ligand_coverage,
                     metrics.pocket_precision
                 );
@@ -64,21 +64,39 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Compute summary statistics
+    let total_cases = all_metrics.len();
+    let dcc_successes = all_metrics.iter().filter(|m| m.dcc_success).count();
+    let mean_dcc = mean(&all_metrics, |m| m.dcc);
+    let mean_coverage = mean(&all_metrics, |m| m.ligand_coverage);
+    let mean_precision = mean(&all_metrics, |m| m.pocket_precision);
+
     let summary = BenchmarkSummary {
-        cases: all_metrics.len(),
-        success_rate: mean(&all_metrics, |m| m.success_rate),
-        mean_center_distance: mean(&all_metrics, |m| m.center_distance),
-        mean_coverage: mean(&all_metrics, |m| m.ligand_coverage),
-        mean_precision: mean(&all_metrics, |m| m.pocket_precision),
+        total_cases,
+        dcc_successes,
+        dca_successes: all_metrics.iter().filter(|m| m.dca_success).count(),
+        dcc_success_rate: dcc_successes as f64 / total_cases.max(1) as f64,
+        dca_success_rate: all_metrics.iter().filter(|m| m.dca_success).count() as f64 / total_cases.max(1) as f64,
+        top1_dcc_rate: 0.0,
+        top3_dcc_rate: 0.0,
+        top5_dcc_rate: 0.0,
+        top1_dca_rate: 0.0,
+        top3_dca_rate: 0.0,
+        top5_dca_rate: 0.0,
+        mean_dcc,
+        mean_dca: mean(&all_metrics, |m| m.dca),
+        std_dcc: 0.0,
+        std_dca: 0.0,
+        case_results: Vec::new(),
     };
 
     println!(
         "Cases: {} success: {:.2} mean_dist: {:.2}Å coverage: {:.2} precision: {:.2}",
-        summary.cases,
-        summary.success_rate,
-        summary.mean_center_distance,
-        summary.mean_coverage,
-        summary.mean_precision
+        total_cases,
+        summary.dcc_success_rate,
+        mean_dcc,
+        mean_coverage,
+        mean_precision
     );
 
     if let Some(out) = cli.summary_out {

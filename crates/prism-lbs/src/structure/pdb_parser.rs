@@ -56,6 +56,9 @@ pub struct ProteinStructure {
     pub center_of_mass: [f64; 3],
     /// Axis-aligned bounding box (min, max)
     pub bounding_box: ([f64; 3], [f64; 3]),
+    /// Path to source PDB file (if loaded from file, needed for fpocket integration)
+    #[serde(skip)]
+    pub pdb_path: Option<std::path::PathBuf>,
 }
 
 impl Default for ProteinStructure {
@@ -73,6 +76,7 @@ impl Default for ProteinStructure {
             has_alternate_locations: false,
             center_of_mass: [0.0; 3],
             bounding_box: ([0.0; 3], [0.0; 3]),
+            pdb_path: None,
         }
     }
 }
@@ -81,7 +85,9 @@ impl ProteinStructure {
     /// Parse a PDB file from disk
     pub fn from_pdb_file(path: &Path) -> Result<Self, LbsError> {
         let pdb_data = fs::read_to_string(path)?;
-        Self::from_pdb_str_with_options(&pdb_data, PdbParseOptions::default())
+        let mut structure = Self::from_pdb_str_with_options(&pdb_data, PdbParseOptions::default())?;
+        structure.pdb_path = Some(path.to_path_buf());
+        Ok(structure)
     }
 
     /// Parse a PDB file with custom options
@@ -90,7 +96,9 @@ impl ProteinStructure {
         options: PdbParseOptions,
     ) -> Result<Self, LbsError> {
         let pdb_data = fs::read_to_string(path)?;
-        Self::from_pdb_str_with_options(&pdb_data, options)
+        let mut structure = Self::from_pdb_str_with_options(&pdb_data, options)?;
+        structure.pdb_path = Some(path.to_path_buf());
+        Ok(structure)
     }
 
     /// Parse a PDB structure from an in-memory string

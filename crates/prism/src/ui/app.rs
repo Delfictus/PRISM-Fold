@@ -100,10 +100,13 @@ pub struct GpuStatus {
 pub struct ProteinState {
     pub name: String,
     pub residue_count: usize,
+    pub atom_count: usize,
+    pub chain_count: usize,
     pub pockets: Vec<PocketInfo>,
     pub gnn_attention: Vec<(String, f64)>, // (residue, attention)
     pub binding_affinity: f64,
     pub druggability: f64,
+    pub lbs_progress: LbsProgress,
 }
 
 #[derive(Debug, Clone)]
@@ -112,7 +115,21 @@ pub struct PocketInfo {
     pub volume: f64,
     pub depth: f64,
     pub druggability: f64,
+    pub center: [f64; 3],
     pub residues: Vec<String>,
+    pub hydrophobicity: f64,
+    pub enclosure: f64,
+}
+
+/// LBS pipeline progress tracking
+#[derive(Debug, Clone, Default)]
+pub struct LbsProgress {
+    pub current_phase: Option<String>,
+    pub pockets_detected: usize,
+    pub best_druggability: f32,
+    pub phase_iteration: usize,
+    pub phase_max_iterations: usize,
+    pub gpu_accelerated: bool,
 }
 
 /// Main application state
@@ -428,7 +445,16 @@ impl App {
         }
 
         if input_lower == "run" || input_lower == "go" || input_lower == "solve" {
-            return self.start_optimization();
+            return match self.mode {
+                AppMode::Biomolecular => self.start_lbs_prediction(),
+                _ => self.start_optimization(),
+            };
+        }
+
+        if input_lower == "analyze" || input_lower == "predict" {
+            if self.mode == AppMode::Biomolecular {
+                return self.start_lbs_prediction();
+            }
         }
 
         if input_lower == "stop" || input_lower == "pause" {
@@ -491,6 +517,32 @@ impl App {
         Ok(format!(
             "Starting optimization on {}...\n\n\
              I'll keep you updated on progress. Feel free to ask questions or adjust parameters.",
+            self.input_path.as_ref().unwrap()
+        ))
+    }
+
+    /// Start LBS (Ligand Binding Site) prediction pipeline
+    fn start_lbs_prediction(&mut self) -> Result<String> {
+        if self.input_path.is_none() {
+            return Ok("No PDB file loaded. Use 'load <path.pdb>' first.".into());
+        }
+
+        // Initialize LBS-specific phases
+        for phase in &mut self.phases {
+            phase.status = PhaseState::Pending;
+            phase.progress = 0.0;
+        }
+
+        // Clear previous pockets
+        self.protein.pockets.clear();
+
+        // Start first phase
+        self.phases[0].status = PhaseState::Running;
+
+        Ok(format!(
+            "Starting LBS prediction on {}...\n\n\
+             Running 7-phase pocket detection with GPU acceleration.\n\
+             I'll report binding sites as they're detected.",
             self.input_path.as_ref().unwrap()
         ))
     }
