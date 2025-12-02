@@ -1,11 +1,16 @@
 //! Protein structure representation and parsing
+//!
+//! Supports both legacy PDB format and modern mmCIF/CIF format.
+//! Format is auto-detected from file extension.
 
 pub mod atom;
+pub mod cif_parser;
 pub mod pdb_parser;
 pub mod residue;
 pub mod surface;
 
 pub use atom::Atom;
+pub use cif_parser::StructureFormat;
 pub use pdb_parser::{PdbParseOptions, ProteinStructure};
 pub use residue::Residue;
 pub use surface::SurfaceComputer;

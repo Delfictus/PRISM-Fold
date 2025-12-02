@@ -155,7 +155,7 @@ fn main() -> anyhow::Result<()> {
 
 fn run_single(cli: &Cli, config: LbsConfig) -> anyhow::Result<()> {
     let start_time = Instant::now();
-    let mut structure = ProteinStructure::from_pdb_file(&cli.input)?;
+    let mut structure = ProteinStructure::from_file(&cli.input)?;
     let base = resolve_output_base(&cli.output, &cli.input);
 
     // Choose detection mode
@@ -332,15 +332,22 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
         let entry = entry?;
         if entry.file_type()?.is_file() {
             let path = entry.path();
-            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if ext.eq_ignore_ascii_case("pdb") {
-                    pdb_files.push(path);
-                }
+            let name = path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            // Support all structure formats: PDB, CIF, and gzipped variants
+            if name.ends_with(".pdb") || name.ends_with(".ent")
+                || name.ends_with(".cif") || name.ends_with(".mmcif")
+                || name.ends_with(".pdb.gz") || name.ends_with(".ent.gz")
+                || name.ends_with(".cif.gz") || name.ends_with(".mmcif.gz")
+            {
+                pdb_files.push(path);
             }
         }
     }
 
-    log::info!("Found {} PDB files to process", pdb_files.len());
+    log::info!("Found {} structure files to process (PDB/CIF)", pdb_files.len());
     let use_publication = cli.publication;
     let use_gpu = config.use_gpu;
     let use_pure_gpu = cli.pure_gpu;
@@ -354,7 +361,7 @@ fn run_batch(cli: &Cli, config: LbsConfig, parallel: usize) -> anyhow::Result<()
     pdb_files.chunks(parallel.max(1)).for_each(|batch| {
         for path in batch {
             let start_time = Instant::now();
-            if let Ok(structure) = ProteinStructure::from_pdb_file(path) {
+            if let Ok(structure) = ProteinStructure::from_file(path) {
                 // Choose prediction path based on pure_gpu flag
                 #[cfg(feature = "cuda")]
                 let pockets_result: Result<Vec<_>, _> = if use_pure_gpu {
