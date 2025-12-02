@@ -1,21 +1,25 @@
 #!/bin/bash
+# ============================================================================
+# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
+# This script will NOT download data. You must provide it manually.
+# ============================================================================
 #
 # CryptoBench External Ground Truth Benchmark Runner
 #
-# Downloads and evaluates PRISM-LBS against CryptoBench:
-#   - 1,107 APO structures with cryptic binding sites
-#   - 5,493 ground truth annotations from holo structures
-#   - Official train/test splits
+# REQUIRED DATA (must be manually provided):
+#   - benchmarks/datasets/cryptobench/dataset.json
+#   - benchmarks/datasets/cryptobench/folds.json
+#   - benchmarks/datasets/cryptobench/structures/test/*.cif or *.pdb
 #
-# External Source: https://osf.io/pz4a9/
-# Paper: Bioinformatics 2024, btae745
+# Download sources:
+#   - Dataset: https://osf.io/pz4a9/
+#   - Structures: https://files.rcsb.org/download/{pdb_id}.cif
 #
 # Usage:
-#   ./scripts/run_cryptobench.sh [--quick] [--download]
+#   ./scripts/run_cryptobench.sh [--quick] [--split test]
 #
 # Options:
 #   --quick      Run on 20 structures for quick testing
-#   --download   Download PDB structures from RCSB
 #   --split      Specify split (test, train-0, train-1, train-2, train-3)
 #
 
@@ -43,13 +47,18 @@ NC='\033[0m'
 
 # Parse arguments
 QUICK_MODE=false
-DOWNLOAD_MODE=false
 SPLIT="test"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --quick) QUICK_MODE=true; shift ;;
-        --download) DOWNLOAD_MODE=true; shift ;;
         --split) SPLIT="$2"; shift 2 ;;
+        --download)
+            echo -e "${RED}ERROR: --download flag is not supported.${NC}"
+            echo "This script does NOT auto-download data."
+            echo "Please manually download structures to: $CRYPTOBENCH_DIR/structures/$SPLIT/"
+            echo "Source: https://files.rcsb.org/download/{pdb_id}.cif"
+            exit 1
+            ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -57,22 +66,70 @@ done
 echo ""
 echo "============================================================"
 echo "   CryptoBench External Ground Truth Benchmark"
-echo "   (Source: https://osf.io/pz4a9/)"
+echo "   (NO AUTO-DOWNLOADS - Manual data provision required)"
 echo "============================================================"
 echo ""
 
-# Check for dataset
+# ============================================================================
+# MANDATORY DATA CHECKS - Exit with error if missing
+# ============================================================================
+
+# Check for dataset.json
 if [[ ! -f "$CRYPTOBENCH_DIR/dataset.json" ]]; then
-    echo -e "${YELLOW}Downloading CryptoBench dataset from OSF...${NC}"
-    mkdir -p "$CRYPTOBENCH_DIR"
-    curl -sL "https://osf.io/download/ta2ju/" -o "$CRYPTOBENCH_DIR/dataset.json"
-    curl -sL "https://osf.io/download/5s93p/" -o "$CRYPTOBENCH_DIR/folds.json"
-    curl -sL "https://osf.io/download/x9dce/" -o "$CRYPTOBENCH_DIR/README.md"
-    echo -e "${GREEN}Downloaded CryptoBench dataset (8MB)${NC}"
+    echo -e "${RED}ERROR: Missing required benchmark dataset: CryptoBench dataset.json${NC}"
+    echo ""
+    echo "Please place it in: $CRYPTOBENCH_DIR/dataset.json"
+    echo ""
+    echo "Download from: https://osf.io/pz4a9/"
+    echo "Direct link:   curl -sL 'https://osf.io/download/ta2ju/' -o $CRYPTOBENCH_DIR/dataset.json"
+    exit 1
 fi
 
-# Get test set PDB IDs
+# Check for folds.json
+if [[ ! -f "$CRYPTOBENCH_DIR/folds.json" ]]; then
+    echo -e "${RED}ERROR: Missing required benchmark dataset: CryptoBench folds.json${NC}"
+    echo ""
+    echo "Please place it in: $CRYPTOBENCH_DIR/folds.json"
+    echo ""
+    echo "Download from: https://osf.io/pz4a9/"
+    echo "Direct link:   curl -sL 'https://osf.io/download/5s93p/' -o $CRYPTOBENCH_DIR/folds.json"
+    exit 1
+fi
+
+# Check for structures directory
+STRUCTURES_DIR="$CRYPTOBENCH_DIR/structures/$SPLIT"
+if [[ ! -d "$STRUCTURES_DIR" ]]; then
+    echo -e "${RED}ERROR: Missing required structures directory${NC}"
+    echo ""
+    echo "Please create and populate: $STRUCTURES_DIR/"
+    echo ""
+    echo "Download structures from RCSB:"
+    echo "  https://files.rcsb.org/download/{pdb_id}.cif"
+    exit 1
+fi
+
+# Check if structures exist
+N_STRUCTURES=$(ls "$STRUCTURES_DIR"/*.{cif,pdb} 2>/dev/null | wc -l || echo "0")
+if [[ "$N_STRUCTURES" -eq 0 ]]; then
+    echo -e "${RED}ERROR: No structure files found in $STRUCTURES_DIR${NC}"
+    echo ""
+    echo "Please download CIF/PDB files to this directory."
+    echo "Source: https://files.rcsb.org/download/{pdb_id}.cif"
+    exit 1
+fi
+
+# Check prism binary
+if [[ ! -f "$PRISM_BIN" ]]; then
+    echo -e "${RED}ERROR: prism-lbs binary not found${NC}"
+    echo ""
+    echo "Please build with: cargo build --release --features cuda -p prism-lbs"
+    exit 1
+fi
+
+echo -e "${GREEN}All required data present${NC}"
 echo ""
+
+# Get test set PDB IDs
 echo "Split: $SPLIT"
 TEST_PDBS=$(python3 -c "
 import json
@@ -83,6 +140,7 @@ print(' '.join(pdbs))
 ")
 N_TOTAL=$(echo $TEST_PDBS | wc -w)
 echo "Structures in split: $N_TOTAL"
+echo "Structures available: $N_STRUCTURES"
 
 # Quick mode - only 20 structures
 if $QUICK_MODE; then
@@ -93,53 +151,10 @@ fi
 
 # Setup directories
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-STRUCTURES_DIR="$CRYPTOBENCH_DIR/structures/$SPLIT"
 PREDICTIONS_DIR="$CRYPTOBENCH_DIR/predictions/${SPLIT}_${TIMESTAMP}"
 RESULTS_FILE="$CRYPTOBENCH_DIR/results_${SPLIT}_${TIMESTAMP}.json"
 
-mkdir -p "$STRUCTURES_DIR"
 mkdir -p "$PREDICTIONS_DIR"
-
-# Download structures if needed
-if $DOWNLOAD_MODE; then
-    echo ""
-    echo -e "${BLUE}Downloading PDB structures from RCSB...${NC}"
-
-    for pdb_id in $TEST_PDBS; do
-        pdb_lower=$(echo "$pdb_id" | tr '[:upper:]' '[:lower:]')
-
-        # Try CIF first, then PDB
-        if [[ ! -f "$STRUCTURES_DIR/${pdb_lower}.cif" ]] && [[ ! -f "$STRUCTURES_DIR/${pdb_lower}.pdb" ]]; then
-            if curl -sf "https://files.rcsb.org/download/${pdb_lower}.cif" -o "$STRUCTURES_DIR/${pdb_lower}.cif" 2>/dev/null; then
-                echo -n "."
-            elif curl -sf "https://files.rcsb.org/download/${pdb_lower}.pdb" -o "$STRUCTURES_DIR/${pdb_lower}.pdb" 2>/dev/null; then
-                echo -n "."
-            else
-                echo -e "\n  ${RED}Failed to download $pdb_id${NC}"
-            fi
-        fi
-    done
-    echo ""
-
-    DOWNLOADED=$(ls "$STRUCTURES_DIR"/*.{cif,pdb} 2>/dev/null | wc -l)
-    echo -e "${GREEN}Downloaded $DOWNLOADED structures${NC}"
-fi
-
-# Check if structures exist
-N_STRUCTURES=$(ls "$STRUCTURES_DIR"/*.{cif,pdb} 2>/dev/null | wc -l)
-if [[ $N_STRUCTURES -eq 0 ]]; then
-    echo -e "${RED}No structures found in $STRUCTURES_DIR${NC}"
-    echo "Run with --download to fetch structures from RCSB"
-    exit 1
-fi
-echo "Structures available: $N_STRUCTURES"
-
-# Check prism binary
-if [[ ! -f "$PRISM_BIN" ]]; then
-    echo -e "${RED}Error: prism-lbs binary not found${NC}"
-    echo "Run: cargo build --release --features cuda -p prism-lbs"
-    exit 1
-fi
 
 # Run PRISM predictions
 echo ""

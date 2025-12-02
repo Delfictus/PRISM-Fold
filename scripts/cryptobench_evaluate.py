@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
+# ============================================================================
+# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
+# This script will NOT download data. You must provide it manually.
+# ============================================================================
 """
 CryptoBench External Ground Truth Evaluation for PRISM-LBS
 
 Uses the CryptoBench dataset (Bioinformatics 2024) with 1,107 APO structures
 and 5,493 cryptic binding site annotations.
+
+REQUIRED DATA (must be manually provided):
+  - benchmarks/datasets/cryptobench/dataset.json
+  - benchmarks/datasets/cryptobench/folds.json
 
 External Ground Truth Source:
 - OSF: https://osf.io/pz4a9/
@@ -19,16 +27,12 @@ Evaluation Metrics:
 import os
 import sys
 import json
-import urllib.request
 import argparse
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
-import subprocess
-import tempfile
-import shutil
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -107,31 +111,6 @@ def load_cryptobench_ground_truth(
                 ))
 
     return dict(ground_truth)
-
-
-def download_pdb(pdb_id: str, output_dir: Path, use_cif: bool = True) -> Optional[Path]:
-    """Download PDB/CIF file from RCSB."""
-    pdb_id = pdb_id.lower()
-
-    if use_cif:
-        url = f"https://files.rcsb.org/download/{pdb_id}.cif"
-        output_path = output_dir / f"{pdb_id}.cif"
-    else:
-        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-        output_path = output_dir / f"{pdb_id}.pdb"
-
-    if output_path.exists():
-        return output_path
-
-    try:
-        urllib.request.urlretrieve(url, output_path)
-        return output_path
-    except Exception as e:
-        # Try alternate format
-        if use_cif:
-            return download_pdb(pdb_id, output_dir, use_cif=False)
-        print(f"  Failed to download {pdb_id}: {e}")
-        return None
 
 
 def parse_prism_json(json_path: Path) -> List[Prediction]:
@@ -495,23 +474,32 @@ def main():
                         choices=['test', 'train-0', 'train-1', 'train-2', 'train-3'],
                         help='CryptoBench split to evaluate (default: test)')
     parser.add_argument('--output', type=Path, help='Output JSON file for results')
-    parser.add_argument('--download-structures', action='store_true',
-                        help='Download missing PDB structures')
-    parser.add_argument('--structures-dir', type=Path,
-                        help='Directory for PDB structures')
 
     args = parser.parse_args()
 
-    # Check for dataset
+    # ========================================================================
+    # MANDATORY DATA CHECKS - Exit with error if missing
+    # ========================================================================
+
     dataset_path = CRYPTOBENCH_DIR / 'dataset.json'
     folds_path = CRYPTOBENCH_DIR / 'folds.json'
 
     if not dataset_path.exists():
-        print("ERROR: CryptoBench dataset not found!")
-        print(f"Expected at: {dataset_path}")
-        print("\nTo download, run:")
-        print("  curl -sL 'https://osf.io/download/ta2ju/' -o benchmarks/datasets/cryptobench/dataset.json")
-        print("  curl -sL 'https://osf.io/download/5s93p/' -o benchmarks/datasets/cryptobench/folds.json")
+        print("ERROR: Missing required benchmark dataset: CryptoBench dataset.json")
+        print(f"")
+        print(f"Please place it in: {dataset_path}")
+        print(f"")
+        print(f"Download from: https://osf.io/pz4a9/")
+        print(f"Direct link:   curl -sL 'https://osf.io/download/ta2ju/' -o {dataset_path}")
+        sys.exit(1)
+
+    if not folds_path.exists():
+        print("ERROR: Missing required benchmark dataset: CryptoBench folds.json")
+        print(f"")
+        print(f"Please place it in: {folds_path}")
+        print(f"")
+        print(f"Download from: https://osf.io/pz4a9/")
+        print(f"Direct link:   curl -sL 'https://osf.io/download/5s93p/' -o {folds_path}")
         sys.exit(1)
 
     # Load ground truth
@@ -521,16 +509,6 @@ def main():
 
     total_sites = sum(len(s) for s in ground_truth.values())
     print(f"Total cryptic site annotations: {total_sites}")
-
-    # Optionally download structures
-    if args.download_structures:
-        structures_dir = args.structures_dir or (CRYPTOBENCH_DIR / 'structures' / args.split)
-        structures_dir.mkdir(parents=True, exist_ok=True)
-
-        print(f"\nDownloading structures to {structures_dir}...")
-        for pdb_id in ground_truth.keys():
-            download_pdb(pdb_id, structures_dir)
-        print("Download complete")
 
     # Run evaluation
     if not args.predictions.exists():

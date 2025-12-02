@@ -1,24 +1,25 @@
 #!/bin/bash
+# ============================================================================
+# PRISM-LBS BENCHMARK SCRIPT — NO AUTO-DOWNLOADS
+# This script will NOT download data. You must provide it manually.
+# ============================================================================
 #
-# PRISM-LBS LIGYSIS Benchmark Runner
-# Runs full 3,446+ structure benchmark against LIGYSIS ground truth
+# LIGYSIS External Ground Truth Benchmark Runner
 #
-# External Ground Truth Source:
-#   - https://zenodo.org/doi/10.5281/zenodo.13171100
-#   - Journal of Cheminformatics 2024
+# REQUIRED DATA (must be manually provided):
+#   - benchmarks/datasets/ligysis/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl
+#   - benchmarks/datasets/ligysis/structures/*.cif or *.pdb
+#
+# Download sources:
+#   - Ground truth: https://zenodo.org/doi/10.5281/zenodo.13171100
+#   - Structures: https://files.rcsb.org/download/{pdb_id}.cif
 #
 # Usage:
-#   ./scripts/run_ligysis_benchmark.sh [--quick] [--skip-run] [--download]
+#   ./scripts/run_ligysis_benchmark.sh [--quick] [--skip-run]
 #
 # Options:
 #   --quick      Run on subset (100 structures) for quick testing
 #   --skip-run   Skip PRISM prediction, only evaluate existing predictions
-#   --download   Force download of structures from RCSB
-#
-# PRISM-LBS Mode:
-#   Uses --unified for combined detector (geometric + softspot cryptic sites)
-#   Uses --gpu-geometry for GPU-accelerated surface calculations
-#   Uses --publication for publication-quality output format
 #
 
 set -e
@@ -28,12 +29,10 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Paths
 LIGYSIS_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis"
-# Use ORIGINAL structures from RCSB (not transformed) for ground truth comparison
 PDB_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis/structures"
 GROUND_TRUTH_PKL="$LIGYSIS_DIR/MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl"
 RESULTS_DIR="$PROJECT_ROOT/benchmarks/datasets/ligysis/results"
 PRISM_BIN="$PROJECT_ROOT/target/release/prism-lbs"
-DOWNLOAD_SCRIPT="$SCRIPT_DIR/download_ligysis_structures.py"
 
 # Environment
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.6}"
@@ -50,19 +49,24 @@ NC='\033[0m'
 echo ""
 echo "============================================================"
 echo "   LIGYSIS External Ground Truth Benchmark"
-echo "   (Source: https://zenodo.org/doi/10.5281/zenodo.13171100)"
+echo "   (NO AUTO-DOWNLOADS - Manual data provision required)"
 echo "============================================================"
 echo ""
 
 # Parse arguments
 QUICK_MODE=false
 SKIP_RUN=false
-DOWNLOAD_MODE=false
 for arg in "$@"; do
     case $arg in
         --quick) QUICK_MODE=true ;;
         --skip-run) SKIP_RUN=true ;;
-        --download) DOWNLOAD_MODE=true ;;
+        --download)
+            echo -e "${RED}ERROR: --download flag is not supported.${NC}"
+            echo "This script does NOT auto-download data."
+            echo "Please manually download structures to: $PDB_DIR/"
+            echo "Source: https://files.rcsb.org/download/{pdb_id}.cif"
+            exit 1
+            ;;
     esac
 done
 
@@ -70,50 +74,53 @@ if $QUICK_MODE; then
     echo -e "${YELLOW}Running in QUICK mode (100 structures)${NC}"
 fi
 
-# Download structures if requested or if directory doesn't exist
-if $DOWNLOAD_MODE || [[ ! -d "$PDB_DIR" ]]; then
-    echo -e "${BLUE}Downloading original structures from RCSB...${NC}"
-    echo "(This is required because ground truth uses original RCSB coordinates)"
-    echo ""
-
-    if $QUICK_MODE; then
-        python3 "$DOWNLOAD_SCRIPT" --quick --output "$PDB_DIR"
-    else
-        python3 "$DOWNLOAD_SCRIPT" --output "$PDB_DIR"
-    fi
-    echo ""
-fi
+# ============================================================================
+# MANDATORY DATA CHECKS - Exit with error if missing
+# ============================================================================
 
 # Check ground truth file
 if [[ ! -f "$GROUND_TRUTH_PKL" ]]; then
-    echo -e "${RED}Error: Ground truth file not found:${NC}"
-    echo "  $GROUND_TRUTH_PKL"
+    echo -e "${RED}ERROR: Missing required benchmark dataset: LIGYSIS ground truth${NC}"
     echo ""
-    echo "Please ensure MASTER_POCKET_SHAPE_DICT_EXTENDED_TRANS.pkl is in:"
-    echo "  $LIGYSIS_DIR"
+    echo "Please place it in: $GROUND_TRUTH_PKL"
     echo ""
-    echo "Original source: https://zenodo.org/doi/10.5281/zenodo.13171100"
+    echo "Download from: https://zenodo.org/doi/10.5281/zenodo.13171100"
     exit 1
 fi
 
+# Check structures directory
+if [[ ! -d "$PDB_DIR" ]]; then
+    echo -e "${RED}ERROR: Missing required structures directory${NC}"
+    echo ""
+    echo "Please create and populate: $PDB_DIR/"
+    echo ""
+    echo "Download structures from RCSB:"
+    echo "  https://files.rcsb.org/download/{pdb_id}.cif"
+    exit 1
+fi
+
+# Check if structures exist
+TOTAL_STRUCTURES=$(ls -1 "$PDB_DIR"/*.{cif,pdb} 2>/dev/null | wc -l || echo "0")
+if [[ "$TOTAL_STRUCTURES" -eq 0 ]]; then
+    echo -e "${RED}ERROR: No structure files found in $PDB_DIR${NC}"
+    echo ""
+    echo "Please download CIF/PDB files to this directory."
+    echo "Source: https://files.rcsb.org/download/{pdb_id}.cif"
+    exit 1
+fi
+
+# Check prism binary
+if [[ ! -f "$PRISM_BIN" ]]; then
+    echo -e "${RED}ERROR: prism-lbs binary not found at $PRISM_BIN${NC}"
+    echo ""
+    echo "Please build with: cargo build --release --features cuda -p prism-lbs"
+    exit 1
+fi
+
+echo -e "${GREEN}All required data present${NC}"
+echo ""
 echo -e "${GREEN}Ground truth:${NC} $(basename $GROUND_TRUTH_PKL)"
 echo "  Size: $(du -h "$GROUND_TRUTH_PKL" | cut -f1)"
-
-# Check prerequisites
-if [[ ! -f "$PRISM_BIN" ]]; then
-    echo -e "${RED}Error: prism-lbs binary not found at $PRISM_BIN${NC}"
-    echo "Run: cargo build --release --features cuda -p prism-lbs"
-    exit 1
-fi
-
-if [[ ! -d "$PDB_DIR" ]]; then
-    echo -e "${RED}Error: LIGYSIS structures directory not found at $PDB_DIR${NC}"
-    echo "Run with --download to fetch structures from RCSB"
-    exit 1
-fi
-
-# Count structures (both CIF and PDB files)
-TOTAL_STRUCTURES=$(ls -1 "$PDB_DIR"/*.{cif,pdb} 2>/dev/null | wc -l)
 echo "Structures available: $TOTAL_STRUCTURES"
 
 # Setup
@@ -202,7 +209,7 @@ cat > "$REPORT_OUTPUT" << EOF
 
 **Date:** $(date -Iseconds)
 **Structures:** $PROCESSED / $EXPECTED
-**Duration:** ${DURATION}s ($(echo "scale=2; $PROCESSED / $DURATION" | bc) structures/sec)
+**Duration:** ${DURATION}s
 
 ## Configuration
 
@@ -230,12 +237,6 @@ $(awk -F',' 'NR>1 && $2==2 && $4==0.25 {printf "| %s | %.1f |\n", $1, $6}' "$EVA
 | VN-EGNN | 46 |
 | PUResNet | 45 |
 | IF-SitePred | 55 |
-
-## Full Results Matrix
-
-\`\`\`
-$(cat "$RUN_DIR/evaluation_log.txt" 2>/dev/null | grep -A20 "Full Results Matrix" || echo "See evaluation.csv")
-\`\`\`
 
 ## Files
 
