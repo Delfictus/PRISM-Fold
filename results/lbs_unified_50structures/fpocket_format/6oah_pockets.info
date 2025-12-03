@@ -1,0 +1,13 @@
+Pocket detection results for 6OAH
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6732
+  Volume (A^3): 66434.34
+  Surface Area (A^2): 7932.55
+  Hydrophobicity: 0.4593
+  Enclosure: 0.9254
+  Center: (9.26, 30.46, -7.15)
+  Residues: 365
+  Atoms: 2800
+

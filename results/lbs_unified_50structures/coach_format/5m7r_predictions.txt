@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 5M7R
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6682	0.986	1.602	32.475	177611.48

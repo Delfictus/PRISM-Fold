@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 5CI9
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6581	5.758	31.058	80.910	23903.86

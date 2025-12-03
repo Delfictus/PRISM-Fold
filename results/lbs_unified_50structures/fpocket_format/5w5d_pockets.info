@@ -1,0 +1,13 @@
+Pocket detection results for 5W5D
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6686
+  Volume (A^3): 74425.92
+  Surface Area (A^2): 8556.58
+  Hydrophobicity: 0.3928
+  Enclosure: 0.9190
+  Center: (-25.29, 14.57, -5.14)
+  Residues: 409
+  Atoms: 3049
+

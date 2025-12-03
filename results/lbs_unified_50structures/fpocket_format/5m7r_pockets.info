@@ -1,0 +1,13 @@
+Pocket detection results for 5M7R
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6682
+  Volume (A^3): 177611.48
+  Surface Area (A^2): 15280.29
+  Hydrophobicity: 0.4483
+  Enclosure: 0.9407
+  Center: (0.99, 1.60, 32.48)
+  Residues: 934
+  Atoms: 7636
+

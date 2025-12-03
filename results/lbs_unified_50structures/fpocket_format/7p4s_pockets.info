@@ -1,0 +1,13 @@
+Pocket detection results for 7P4S
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6759
+  Volume (A^3): 27049.36
+  Surface Area (A^2): 4357.68
+  Hydrophobicity: 0.4205
+  Enclosure: 0.9279
+  Center: (10.58, 12.66, 16.60)
+  Residues: 134
+  Atoms: 1068
+

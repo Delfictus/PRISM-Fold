@@ -1,0 +1,13 @@
+Pocket detection results for 7FNA
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6733
+  Volume (A^3): 106759.69
+  Surface Area (A^2): 10883.18
+  Hydrophobicity: 0.4676
+  Enclosure: 0.9531
+  Center: (26.98, 9.49, 3.91)
+  Residues: 537
+  Atoms: 8563
+

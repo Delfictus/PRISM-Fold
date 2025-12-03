@@ -1,0 +1,13 @@
+Pocket detection results for 5OJX
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6876
+  Volume (A^3): 39902.20
+  Surface Area (A^2): 5646.97
+  Hydrophobicity: 0.4473
+  Enclosure: 0.8977
+  Center: (-5.93, 1.38, 11.42)
+  Residues: 210
+  Atoms: 1603
+

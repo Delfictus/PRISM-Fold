@@ -1,0 +1,13 @@
+Pocket detection results for 7FO2
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6693
+  Volume (A^3): 109158.05
+  Surface Area (A^2): 11045.57
+  Hydrophobicity: 0.4662
+  Enclosure: 0.9531
+  Center: (26.85, 9.40, 3.69)
+  Residues: 547
+  Atoms: 8657
+

@@ -1,0 +1,13 @@
+Pocket detection results for 8E7Y
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.7049
+  Volume (A^3): 57620.11
+  Surface Area (A^2): 7214.40
+  Hydrophobicity: 0.5410
+  Enclosure: 0.9316
+  Center: (-12.57, 5.59, -17.60)
+  Residues: 312
+  Atoms: 2499
+

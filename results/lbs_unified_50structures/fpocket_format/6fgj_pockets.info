@@ -1,0 +1,13 @@
+Pocket detection results for 6FGJ
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6746
+  Volume (A^3): 79305.33
+  Surface Area (A^2): 8926.59
+  Hydrophobicity: 0.4277
+  Enclosure: 0.9093
+  Center: (-24.39, -17.92, -28.65)
+  Residues: 392
+  Atoms: 3243
+

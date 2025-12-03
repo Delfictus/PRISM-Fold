@@ -1,0 +1,13 @@
+Pocket detection results for 7B88
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6684
+  Volume (A^3): 42795.42
+  Surface Area (A^2): 5916.74
+  Hydrophobicity: 0.4747
+  Enclosure: 0.9145
+  Center: (10.73, 8.11, 30.02)
+  Residues: 226
+  Atoms: 1801
+

@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 7FP9
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6620	26.232	9.485	3.609	108954.28

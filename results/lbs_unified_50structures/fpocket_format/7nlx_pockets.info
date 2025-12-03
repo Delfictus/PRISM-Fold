@@ -1,0 +1,13 @@
+Pocket detection results for 7NLX
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6868
+  Volume (A^3): 51196.64
+  Surface Area (A^2): 6667.74
+  Hydrophobicity: 0.5144
+  Enclosure: 0.9047
+  Center: (26.87, -18.98, 24.96)
+  Residues: 293
+  Atoms: 2120
+

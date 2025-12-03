@@ -1,0 +1,13 @@
+Pocket detection results for 7FPA
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6637
+  Volume (A^3): 108932.34
+  Surface Area (A^2): 11030.33
+  Hydrophobicity: 0.4669
+  Enclosure: 0.9534
+  Center: (26.79, 9.67, 3.69)
+  Residues: 559
+  Atoms: 8730
+

@@ -1,0 +1,13 @@
+Pocket detection results for 8F1Z
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6816
+  Volume (A^3): 59777.58
+  Surface Area (A^2): 7393.38
+  Hydrophobicity: 0.4531
+  Enclosure: 0.9192
+  Center: (8.64, -59.02, -25.08)
+  Residues: 306
+  Atoms: 2462
+

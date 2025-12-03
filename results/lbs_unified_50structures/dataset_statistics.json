@@ -1,0 +1,31 @@
+{
+  "dataset": {
+    "num_structures": 50,
+    "total_pockets": 50,
+    "avg_pockets_per_structure": 1.0
+  },
+  "druggability": {
+    "min": 0.6581,
+    "max": 0.7096,
+    "mean": 0.6741,
+    "median": 0.6725
+  },
+  "volume_A3": {
+    "min": 23903.8594,
+    "max": 1313808.1875,
+    "mean": 130033.2825,
+    "median": 102548.1094
+  },
+  "residues_per_pocket": {
+    "min": 115,
+    "max": 7487,
+    "mean": 695.68,
+    "median": 533
+  },
+  "pockets_per_structure": {
+    "min": 1,
+    "max": 1,
+    "mean": 1.0,
+    "median": 1
+  }
+}

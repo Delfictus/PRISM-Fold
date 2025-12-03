@@ -1,0 +1,13 @@
+Pocket detection results for 7MBK
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6771
+  Volume (A^3): 34669.27
+  Surface Area (A^2): 5141.78
+  Hydrophobicity: 0.4569
+  Enclosure: 0.9504
+  Center: (11.15, 7.25, 16.33)
+  Residues: 159
+  Atoms: 2660
+

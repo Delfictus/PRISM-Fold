@@ -1,0 +1,13 @@
+Pocket detection results for 6XUH
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6676
+  Volume (A^3): 393347.39
+  Surface Area (A^2): 25961.81
+  Hydrophobicity: 0.4370
+  Enclosure: 0.9512
+  Center: (25.62, -23.17, 21.98)
+  Residues: 2156
+  Atoms: 17198
+

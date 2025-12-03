@@ -1,0 +1,13 @@
+Pocket detection results for 6UVF
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6742
+  Volume (A^3): 319042.55
+  Surface Area (A^2): 22579.61
+  Hydrophobicity: 0.4576
+  Enclosure: 0.9407
+  Center: (31.80, 4.98, 26.23)
+  Residues: 1728
+  Atoms: 13776
+

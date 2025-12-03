@@ -1,0 +1,27 @@
+PRISM-LBS Unified Ultra-Refined Results - Statistics
+=======================================================
+
+Generated: 2025-12-03 05:29:51
+
+Dataset Overview:
+  Structures analyzed: 50
+  Total pockets found: 50
+  Avg pockets/structure: 1.0
+
+Druggability Scores:
+  Min: 0.6581
+  Max: 0.7096
+  Mean: 0.6741
+  Median: 0.6725
+
+Pocket Volumes (Å³):
+  Min: 23903.8594
+  Max: 1313808.1875
+  Mean: 130033.2825
+  Median: 102548.1094
+
+Residues per Pocket:
+  Min: 115
+  Max: 7487
+  Mean: 695.68
+  Median: 533

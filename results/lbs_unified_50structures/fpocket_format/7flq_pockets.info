@@ -1,0 +1,13 @@
+Pocket detection results for 7FLQ
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6725
+  Volume (A^3): 108246.80
+  Surface Area (A^2): 10984.01
+  Hydrophobicity: 0.4658
+  Enclosure: 0.9540
+  Center: (26.85, 9.24, 3.76)
+  Residues: 533
+  Atoms: 8634
+

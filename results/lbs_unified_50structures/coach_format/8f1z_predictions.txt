@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 8F1Z
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6816	8.644	-59.022	-25.078	59777.58

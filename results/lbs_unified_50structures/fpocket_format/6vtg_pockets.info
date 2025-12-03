@@ -1,0 +1,13 @@
+Pocket detection results for 6VTG
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6597
+  Volume (A^3): 252685.41
+  Surface Area (A^2): 19328.77
+  Hydrophobicity: 0.4179
+  Enclosure: 0.9350
+  Center: (-49.95, 25.91, -29.74)
+  Residues: 1315
+  Atoms: 10482
+

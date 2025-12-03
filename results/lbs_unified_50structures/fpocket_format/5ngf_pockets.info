@@ -1,0 +1,13 @@
+Pocket detection results for 5NGF
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6670
+  Volume (A^3): 122105.81
+  Surface Area (A^2): 11902.60
+  Hydrophobicity: 0.4281
+  Enclosure: 0.9186
+  Center: (-10.95, -12.68, 29.23)
+  Residues: 663
+  Atoms: 5073
+

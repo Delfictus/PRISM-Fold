@@ -1,0 +1,13 @@
+Pocket detection results for 7MSA
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6845
+  Volume (A^3): 166509.00
+  Surface Area (A^2): 14636.68
+  Hydrophobicity: 0.5056
+  Enclosure: 0.9339
+  Center: (-54.90, 3.02, -73.54)
+  Residues: 921
+  Atoms: 6993
+

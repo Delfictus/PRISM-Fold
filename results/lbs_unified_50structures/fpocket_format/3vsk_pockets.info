@@ -1,0 +1,13 @@
+Pocket detection results for 3VSK
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6599
+  Volume (A^3): 225826.31
+  Surface Area (A^2): 17933.59
+  Hydrophobicity: 0.4018
+  Enclosure: 0.9409
+  Center: (35.11, -39.31, 7.21)
+  Residues: 1199
+  Atoms: 9411
+

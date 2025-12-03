@@ -1,0 +1,13 @@
+Pocket detection results for 6XVK
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6747
+  Volume (A^3): 57598.17
+  Surface Area (A^2): 7212.57
+  Hydrophobicity: 0.4483
+  Enclosure: 0.9145
+  Center: (-5.73, -0.04, 15.63)
+  Residues: 297
+  Atoms: 2385
+

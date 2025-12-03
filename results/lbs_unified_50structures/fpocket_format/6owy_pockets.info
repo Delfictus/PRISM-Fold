@@ -1,0 +1,13 @@
+Pocket detection results for 6OWY
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6695
+  Volume (A^3): 36510.33
+  Surface Area (A^2): 5322.24
+  Hydrophobicity: 0.3990
+  Enclosure: 0.9412
+  Center: (-0.62, -12.91, 17.79)
+  Residues: 179
+  Atoms: 2498
+
