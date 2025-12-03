@@ -1,0 +1,13 @@
+Pocket detection results for 6YG5
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6727
+  Volume (A^3): 51084.84
+  Surface Area (A^2): 6658.03
+  Hydrophobicity: 0.4433
+  Enclosure: 0.9053
+  Center: (18.04, 9.14, 11.69)
+  Residues: 267
+  Atoms: 2090
+

@@ -1,0 +1,13 @@
+Pocket detection results for 5J0B
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6649
+  Volume (A^3): 170703.28
+  Surface Area (A^2): 14881.45
+  Hydrophobicity: 0.4573
+  Enclosure: 0.9518
+  Center: (15.66, -1.85, -3.12)
+  Residues: 866
+  Atoms: 13537
+

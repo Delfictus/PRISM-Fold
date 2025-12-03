@@ -1,0 +1,13 @@
+Pocket detection results for 5CAP
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6760
+  Volume (A^3): 59785.17
+  Surface Area (A^2): 7394.01
+  Hydrophobicity: 0.4514
+  Enclosure: 0.9181
+  Center: (-60.20, -7.43, -25.34)
+  Residues: 303
+  Atoms: 2431
+

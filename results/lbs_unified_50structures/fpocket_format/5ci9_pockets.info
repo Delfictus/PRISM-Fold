@@ -1,0 +1,13 @@
+Pocket detection results for 5CI9
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6581
+  Volume (A^3): 23903.86
+  Surface Area (A^2): 4012.94
+  Hydrophobicity: 0.4265
+  Enclosure: 0.8917
+  Center: (5.76, 31.06, 80.91)
+  Residues: 115
+  Atoms: 979
+

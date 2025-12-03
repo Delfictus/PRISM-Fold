@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 5W5D
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6686	-25.288	14.574	-5.145	74425.92

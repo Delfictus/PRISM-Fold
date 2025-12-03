@@ -1,0 +1,13 @@
+Pocket detection results for 5J7S
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6614
+  Volume (A^3): 57996.00
+  Surface Area (A^2): 7245.74
+  Hydrophobicity: 0.4780
+  Enclosure: 0.9514
+  Center: (-6.48, -45.25, -28.03)
+  Residues: 280
+  Atoms: 4467
+

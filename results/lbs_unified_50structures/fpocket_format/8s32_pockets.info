@@ -1,0 +1,13 @@
+Pocket detection results for 8S32
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6619
+  Volume (A^3): 1313808.19
+  Surface Area (A^2): 58010.34
+  Hydrophobicity: 0.4643
+  Enclosure: 0.9390
+  Center: (158.72, 158.68, 158.13)
+  Residues: 7487
+  Atoms: 55334
+

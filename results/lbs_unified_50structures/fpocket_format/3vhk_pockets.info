@@ -1,0 +1,13 @@
+Pocket detection results for 3VHK
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6717
+  Volume (A^3): 57664.83
+  Surface Area (A^2): 7218.13
+  Hydrophobicity: 0.4388
+  Enclosure: 0.9197
+  Center: (-23.53, 27.63, 22.37)
+  Residues: 291
+  Atoms: 2353
+

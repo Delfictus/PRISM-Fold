@@ -1,0 +1,13 @@
+Pocket detection results for 6V8L
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6801
+  Volume (A^3): 104071.08
+  Surface Area (A^2): 10699.68
+  Hydrophobicity: 0.4524
+  Enclosure: 0.9427
+  Center: (6.40, 41.27, 30.20)
+  Residues: 570
+  Atoms: 4222
+

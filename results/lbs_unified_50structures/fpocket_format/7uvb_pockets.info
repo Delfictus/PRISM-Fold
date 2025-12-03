@@ -1,0 +1,13 @@
+Pocket detection results for 7UVB
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6774
+  Volume (A^3): 102548.11
+  Surface Area (A^2): 10595.04
+  Hydrophobicity: 0.4743
+  Enclosure: 0.9379
+  Center: (-16.33, -3.03, 21.81)
+  Residues: 570
+  Atoms: 4395
+

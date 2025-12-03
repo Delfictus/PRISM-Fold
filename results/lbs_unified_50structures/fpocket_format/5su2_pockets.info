@@ -1,0 +1,13 @@
+Pocket detection results for 5SU2
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6652
+  Volume (A^3): 107978.06
+  Surface Area (A^2): 10965.82
+  Hydrophobicity: 0.4664
+  Enclosure: 0.9533
+  Center: (26.32, 9.31, 3.67)
+  Residues: 559
+  Atoms: 8720
+

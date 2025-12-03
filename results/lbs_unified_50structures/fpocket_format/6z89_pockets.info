@@ -1,0 +1,13 @@
+Pocket detection results for 6Z89
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6718
+  Volume (A^3): 155249.16
+  Surface Area (A^2): 13969.16
+  Hydrophobicity: 0.4612
+  Enclosure: 0.9299
+  Center: (-54.78, 20.74, 22.14)
+  Residues: 833
+  Atoms: 6491
+

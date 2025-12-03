@@ -1,0 +1,13 @@
+Pocket detection results for 4BRR
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.7047
+  Volume (A^3): 110027.11
+  Surface Area (A^2): 11104.11
+  Hydrophobicity: 0.5853
+  Enclosure: 0.9133
+  Center: (-22.83, -7.40, 0.73)
+  Residues: 592
+  Atoms: 4531
+

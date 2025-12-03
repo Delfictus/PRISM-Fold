@@ -1,0 +1,13 @@
+Pocket detection results for 5ST5
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6651
+  Volume (A^3): 108576.70
+  Surface Area (A^2): 11006.31
+  Hydrophobicity: 0.4665
+  Enclosure: 0.9559
+  Center: (26.76, 9.38, 3.75)
+  Residues: 561
+  Atoms: 8669
+

@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 7K1P
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6757	34.622	-27.252	3.631	26301.80

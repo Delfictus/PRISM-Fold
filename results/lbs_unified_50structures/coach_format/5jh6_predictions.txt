@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 5JH6
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6629	-6.938	-45.593	-27.009	59602.08

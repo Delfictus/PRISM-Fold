@@ -1,0 +1,13 @@
+Pocket detection results for 3WMG
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6974
+  Volume (A^3): 112641.47
+  Surface Area (A^2): 11279.32
+  Hydrophobicity: 0.5181
+  Enclosure: 0.9099
+  Center: (21.83, 49.11, 35.03)
+  Residues: 605
+  Atoms: 4571
+

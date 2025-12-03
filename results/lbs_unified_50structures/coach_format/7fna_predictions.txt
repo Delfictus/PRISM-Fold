@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 7FNA
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6733	26.984	9.491	3.906	106759.69

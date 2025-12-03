@@ -1,0 +1,13 @@
+Pocket detection results for 7FP9
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6620
+  Volume (A^3): 108954.28
+  Surface Area (A^2): 11031.82
+  Hydrophobicity: 0.4667
+  Enclosure: 0.9532
+  Center: (26.23, 9.49, 3.61)
+  Residues: 561
+  Atoms: 8752
+

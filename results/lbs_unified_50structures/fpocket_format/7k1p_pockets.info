@@ -1,0 +1,13 @@
+Pocket detection results for 7K1P
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6757
+  Volume (A^3): 26301.80
+  Surface Area (A^2): 4277.02
+  Hydrophobicity: 0.4211
+  Enclosure: 0.8939
+  Center: (34.62, -27.25, 3.63)
+  Residues: 131
+  Atoms: 1065
+

@@ -1,0 +1,3 @@
+# PRISM-LBS Predictions for 3VSK
+# Format: pocket_rank confidence centroid_x centroid_y centroid_z volume
+1	0.6599	35.111	-39.310	7.214	225826.31

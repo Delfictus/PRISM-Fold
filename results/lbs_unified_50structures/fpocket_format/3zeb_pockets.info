@@ -1,0 +1,13 @@
+Pocket detection results for 3ZEB
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.7096
+  Volume (A^3): 35145.14
+  Surface Area (A^2): 5188.73
+  Hydrophobicity: 0.5705
+  Enclosure: 0.9024
+  Center: (15.86, -11.85, 44.52)
+  Residues: 178
+  Atoms: 1435
+

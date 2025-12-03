@@ -1,0 +1,13 @@
+Pocket detection results for 5M7U
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6691
+  Volume (A^3): 168307.45
+  Surface Area (A^2): 14741.89
+  Hydrophobicity: 0.4512
+  Enclosure: 0.9376
+  Center: (1.29, 0.72, 32.25)
+  Residues: 893
+  Atoms: 7309
+

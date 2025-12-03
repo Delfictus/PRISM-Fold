@@ -1,0 +1,13 @@
+Pocket detection results for 5K7H
+==================================================
+
+Pocket 1:
+  Score (druggability): 0.6881
+  Volume (A^3): 70461.14
+  Surface Area (A^2): 8249.94
+  Hydrophobicity: 0.5018
+  Enclosure: 0.9610
+  Center: (37.92, -18.07, -10.61)
+  Residues: 366
+  Atoms: 5660
+

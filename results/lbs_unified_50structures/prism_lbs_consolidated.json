@@ -1,0 +1,960 @@
+{
+  "schema_version": "2.0.0",
+  "tool": "PRISM-LBS",
+  "mode": "unified_ultra_refined",
+  "generated": "2025-12-03T05:29:51.935285",
+  "num_structures": 50,
+  "structures": {
+    "3VHK": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -23.5298686782831,
+            27.628591585210412,
+            22.369862303442428
+          ],
+          "volume": 57664.828125,
+          "druggability": 0.6716610193252563,
+          "confidence": 0.5168506564462737,
+          "residue_count": 291,
+          "atom_count": 2353
+        }
+      ]
+    },
+    "3VSK": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            35.1105041972158,
+            -39.31032557645291,
+            7.213891297417906
+          ],
+          "volume": 225826.3125,
+          "druggability": 0.6598864793777466,
+          "confidence": 0.5181556597976829,
+          "residue_count": 1199,
+          "atom_count": 9411
+        }
+      ]
+    },
+    "3WMG": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            21.832689345876094,
+            49.106242178954325,
+            35.03060052504919
+          ],
+          "volume": 112641.46875,
+          "druggability": 0.6973543763160706,
+          "confidence": 0.5213119040768299,
+          "residue_count": 605,
+          "atom_count": 4571
+        }
+      ]
+    },
+    "3ZEB": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            15.86492961672471,
+            -11.853734494773509,
+            44.51937839721257
+          ],
+          "volume": 35145.140625,
+          "druggability": 0.7095862627029419,
+          "confidence": 0.5228843705537842,
+          "residue_count": 178,
+          "atom_count": 1435
+        }
+      ]
+    },
+    "4BRR": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -22.83043544471421,
+            -7.398598322666099,
+            0.7254932685941331
+          ],
+          "volume": 110027.109375,
+          "druggability": 0.7046904563903809,
+          "confidence": 0.5238254501161341,
+          "residue_count": 592,
+          "atom_count": 4531
+        }
+      ]
+    },
+    "5CAP": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -60.1970559440559,
+            -7.4309823118058524,
+            -25.34060180995475
+          ],
+          "volume": 59785.171875,
+          "druggability": 0.6760437488555908,
+          "confidence": 0.5176390737832107,
+          "residue_count": 303,
+          "atom_count": 2431
+        }
+      ]
+    },
+    "5CI9": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            5.758306435137894,
+            31.058350357507653,
+            80.90979366700734
+          ],
+          "volume": 23903.859375,
+          "druggability": 0.658135712146759,
+          "confidence": 0.5078791782920524,
+          "residue_count": 115,
+          "atom_count": 979
+        }
+      ]
+    },
+    "5EY7": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -9.464048154815494,
+            31.384445994599414,
+            -21.447151890189033
+          ],
+          "volume": 107136.0,
+          "druggability": 0.6803207993507385,
+          "confidence": 0.5212188136990707,
+          "residue_count": 586,
+          "atom_count": 4444
+        }
+      ]
+    },
+    "5J0B": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            15.656785033611566,
+            -1.8475824776538188,
+            -3.1216383984634826
+          ],
+          "volume": 170703.28125,
+          "druggability": 0.6649121642112732,
+          "confidence": 0.5215804086379553,
+          "residue_count": 866,
+          "atom_count": 13537
+        }
+      ]
+    },
+    "5J7S": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -6.4750378329975,
+            -45.254075442131295,
+            -28.029794269084384
+          ],
+          "volume": 57996.0,
+          "druggability": 0.6613917350769043,
+          "confidence": 0.5206322409104842,
+          "residue_count": 280,
+          "atom_count": 4467
+        }
+      ]
+    },
+    "5J8I": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -6.828947254178439,
+            -45.58160017364885,
+            -26.922841111352252
+          ],
+          "volume": 58448.671875,
+          "druggability": 0.6640529036521912,
+          "confidence": 0.5209850079838096,
+          "residue_count": 289,
+          "atom_count": 4607
+        }
+      ]
+    },
+    "5JH6": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -6.938480017376208,
+            -45.593254126846276,
+            -27.008596872284944
+          ],
+          "volume": 59602.078125,
+          "druggability": 0.6629464030265808,
+          "confidence": 0.5207887293404854,
+          "residue_count": 288,
+          "atom_count": 4604
+        }
+      ]
+    },
+    "5JK3": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -6.376704333643978,
+            -45.40247343895612,
+            -28.430592497670162
+          ],
+          "volume": 55769.765625,
+          "druggability": 0.6688807606697083,
+          "confidence": 0.5219219609036805,
+          "residue_count": 270,
+          "atom_count": 4292
+        }
+      ]
+    },
+    "5K7H": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            37.91528144876325,
+            -18.067808657243855,
+            -10.606999293286215
+          ],
+          "volume": 70461.140625,
+          "druggability": 0.6881365180015564,
+          "confidence": 0.5292249422212372,
+          "residue_count": 366,
+          "atom_count": 5660
+        }
+      ]
+    },
+    "5M7R": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            0.9859638554217154,
+            1.6020615505500184,
+            32.475108564693436
+          ],
+          "volume": 177611.484375,
+          "druggability": 0.6681964993476868,
+          "confidence": 0.5201842741297451,
+          "residue_count": 934,
+          "atom_count": 7636
+        }
+      ]
+    },
+    "5M7U": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            1.2881206731427086,
+            0.7182366944862387,
+            32.24727130934459
+          ],
+          "volume": 168307.453125,
+          "druggability": 0.6691173315048218,
+          "confidence": 0.5198015657397983,
+          "residue_count": 893,
+          "atom_count": 7309
+        }
+      ]
+    },
+    "5NGF": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -10.952761679479604,
+            -12.680719298245588,
+            29.230872856298046
+          ],
+          "volume": 122105.8125,
+          "druggability": 0.6670083403587341,
+          "confidence": 0.5154698063591493,
+          "residue_count": 663,
+          "atom_count": 5073
+        }
+      ]
+    },
+    "5NZM": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            28.25612419871797,
+            18.76106704059826,
+            -7.416100427350441
+          ],
+          "volume": 90244.546875,
+          "druggability": 0.6713167428970337,
+          "confidence": 0.5158954250404977,
+          "residue_count": 482,
+          "atom_count": 3744
+        }
+      ]
+    },
+    "5OJX": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -5.930417342482853,
+            1.378962570180908,
+            11.419371802869625
+          ],
+          "volume": 39902.203125,
+          "druggability": 0.6876246929168701,
+          "confidence": 0.5164445387937839,
+          "residue_count": 210,
+          "atom_count": 1603
+        }
+      ]
+    },
+    "5ST5": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.761591994463064,
+            9.384533971623055,
+            3.749480101511122
+          ],
+          "volume": 108576.703125,
+          "druggability": 0.6651272773742676,
+          "confidence": 0.5224688074621504,
+          "residue_count": 561,
+          "atom_count": 8669
+        }
+      ]
+    },
+    "5SU2": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.32041341743118,
+            9.30676135321102,
+            3.667835550458677
+          ],
+          "volume": 107978.0625,
+          "druggability": 0.6651613712310791,
+          "confidence": 0.5219554804224487,
+          "residue_count": 559,
+          "atom_count": 8720
+        }
+      ]
+    },
+    "5SU7": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.43325363896841,
+            9.299611919770783,
+            3.6185190830945446
+          ],
+          "volume": 108553.078125,
+          "druggability": 0.6588954329490662,
+          "confidence": 0.5204860358876964,
+          "residue_count": 554,
+          "atom_count": 8725
+        }
+      ]
+    },
+    "5W5D": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "F",
+          "centroid": [
+            -25.288204657264668,
+            14.574257789439164,
+            -5.144729091505403
+          ],
+          "volume": 74425.921875,
+          "druggability": 0.6686235070228577,
+          "confidence": 0.5159538433021231,
+          "residue_count": 409,
+          "atom_count": 3049
+        }
+      ]
+    },
+    "6FGJ": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -24.38988652482274,
+            -17.917957446808547,
+            -28.654213382670385
+          ],
+          "volume": 79305.328125,
+          "druggability": 0.6746215224266052,
+          "confidence": 0.5155240207546624,
+          "residue_count": 392,
+          "atom_count": 3243
+        }
+      ]
+    },
+    "6OAH": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "F",
+          "centroid": [
+            9.261054285714284,
+            30.46041999999998,
+            -7.152729642857144
+          ],
+          "volume": 66434.34375,
+          "druggability": 0.6732308268547058,
+          "confidence": 0.518379135285105,
+          "residue_count": 365,
+          "atom_count": 2800
+        }
+      ]
+    },
+    "6OWY": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -0.6207385908726998,
+            -12.90627582065651,
+            17.786537229783818
+          ],
+          "volume": 36510.328125,
+          "druggability": 0.6695300936698914,
+          "confidence": 0.5206131078850469,
+          "residue_count": 179,
+          "atom_count": 2498
+        }
+      ]
+    },
+    "6UVF": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            31.79767777293835,
+            4.984601916376308,
+            26.232211599883954
+          ],
+          "volume": 319042.546875,
+          "druggability": 0.6742107272148132,
+          "confidence": 0.52169147390591,
+          "residue_count": 1728,
+          "atom_count": 13776
+        }
+      ]
+    },
+    "6UVG": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            85.22704460059187,
+            11.4979317307692,
+            122.14246353550362
+          ],
+          "volume": 317326.78125,
+          "druggability": 0.6762258410453796,
+          "confidence": 0.5206836791962561,
+          "residue_count": 1695,
+          "atom_count": 13520
+        }
+      ]
+    },
+    "6V8L": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            6.40288441496919,
+            41.26649242065363,
+            30.20324253908105
+          ],
+          "volume": 104071.078125,
+          "druggability": 0.6800549030303955,
+          "confidence": 0.5235499645070067,
+          "residue_count": 570,
+          "atom_count": 4222
+        }
+      ]
+    },
+    "6VTG": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -49.951840965464655,
+            25.90531473001334,
+            -29.74217296317516
+          ],
+          "volume": 252685.40625,
+          "druggability": 0.6597009301185608,
+          "confidence": 0.5169315290379402,
+          "residue_count": 1315,
+          "atom_count": 10482
+        }
+      ]
+    },
+    "6XUH": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            25.617862891033834,
+            -23.173040993138734,
+            21.98477561344351
+          ],
+          "volume": 393347.390625,
+          "druggability": 0.6676461696624756,
+          "confidence": 0.522142964674021,
+          "residue_count": 2156,
+          "atom_count": 17198
+        }
+      ]
+    },
+    "6XVK": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -5.729865408805042,
+            -0.03842641509434477,
+            15.625994549266261
+          ],
+          "volume": 57598.171875,
+          "druggability": 0.6746949553489685,
+          "confidence": 0.5165668205982484,
+          "residue_count": 297,
+          "atom_count": 2385
+        }
+      ]
+    },
+    "6YG5": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            18.04150956937802,
+            9.14462870813395,
+            11.686931100478448
+          ],
+          "volume": 51084.84375,
+          "druggability": 0.67267245054245,
+          "confidence": 0.5142207442145599,
+          "residue_count": 267,
+          "atom_count": 2090
+        }
+      ]
+    },
+    "6Z89": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -54.781200123247636,
+            20.736771067632084,
+            22.13606593745182
+          ],
+          "volume": 155249.15625,
+          "druggability": 0.6717903017997742,
+          "confidence": 0.5189281639571073,
+          "residue_count": 833,
+          "atom_count": 6491
+        }
+      ]
+    },
+    "7B88": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            10.728455857856735,
+            8.11113325930038,
+            30.02035980011108
+          ],
+          "volume": 42795.421875,
+          "druggability": 0.6683804988861084,
+          "confidence": 0.5149935145049807,
+          "residue_count": 226,
+          "atom_count": 1801
+        }
+      ]
+    },
+    "7FLQ": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.852958420199336,
+            9.240922978920617,
+            3.762503474635159
+          ],
+          "volume": 108246.796875,
+          "druggability": 0.6724734902381897,
+          "confidence": 0.5239221714939926,
+          "residue_count": 533,
+          "atom_count": 8634
+        }
+      ]
+    },
+    "7FNA": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.983637510218408,
+            9.490781735373123,
+            3.9061362840125082
+          ],
+          "volume": 106759.6875,
+          "druggability": 0.6733245849609375,
+          "confidence": 0.5239419134947012,
+          "residue_count": 537,
+          "atom_count": 8563
+        }
+      ]
+    },
+    "7FO2": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.853458126371653,
+            9.401294443802707,
+            3.689590851334167
+          ],
+          "volume": 109158.046875,
+          "druggability": 0.6693364977836609,
+          "confidence": 0.5229544317117116,
+          "residue_count": 547,
+          "atom_count": 8657
+        }
+      ]
+    },
+    "7FP9": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.231652308043962,
+            9.485311814442419,
+            3.6085946069469745
+          ],
+          "volume": 108954.28125,
+          "druggability": 0.6620325446128845,
+          "confidence": 0.5211388491331115,
+          "residue_count": 561,
+          "atom_count": 8752
+        }
+      ]
+    },
+    "7FPA": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            26.79118774341352,
+            9.66965063001147,
+            3.6933796105383663
+          ],
+          "volume": 108932.34375,
+          "druggability": 0.6636939644813538,
+          "confidence": 0.5215993215899833,
+          "residue_count": 559,
+          "atom_count": 8730
+        }
+      ]
+    },
+    "7K1P": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            34.62155868544601,
+            -27.251600938967144,
+            3.631114553990607
+          ],
+          "volume": 26301.796875,
+          "druggability": 0.6757394671440125,
+          "confidence": 0.5127142095090078,
+          "residue_count": 131,
+          "atom_count": 1065
+        }
+      ]
+    },
+    "7MBK": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            11.152106015037571,
+            7.246079699248138,
+            16.33126691729323
+          ],
+          "volume": 34669.265625,
+          "druggability": 0.6771025061607361,
+          "confidence": 0.5243508145101088,
+          "residue_count": 159,
+          "atom_count": 2660
+        }
+      ]
+    },
+    "7MSA": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "D",
+          "centroid": [
+            -54.899042042042,
+            3.018173745173752,
+            -73.54428514228539
+          ],
+          "volume": 166509.0,
+          "druggability": 0.6844508051872253,
+          "confidence": 0.5228994880835931,
+          "residue_count": 921,
+          "atom_count": 6993
+        }
+      ]
+    },
+    "7NLX": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            26.87285660377359,
+            -18.983180660377343,
+            24.96015896226424
+          ],
+          "volume": 51196.640625,
+          "druggability": 0.6868118643760681,
+          "confidence": 0.5176463623204322,
+          "residue_count": 293,
+          "atom_count": 2120
+        }
+      ]
+    },
+    "7P4S": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            10.57979119850187,
+            12.65930617977527,
+            16.60296254681648
+          ],
+          "volume": 27049.359375,
+          "druggability": 0.6758844256401062,
+          "confidence": 0.5195516307545958,
+          "residue_count": 134,
+          "atom_count": 1068
+        }
+      ]
+    },
+    "7UVB": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            -16.33393993174067,
+            -3.0334172923777003,
+            21.809171331058046
+          ],
+          "volume": 102548.109375,
+          "druggability": 0.6773627996444702,
+          "confidence": 0.5219174917199912,
+          "residue_count": 570,
+          "atom_count": 4395
+        }
+      ]
+    },
+    "7UW4": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            11.063489042675883,
+            -7.684016147635531,
+            -2.3420184544406015
+          ],
+          "volume": 41866.03125,
+          "druggability": 0.68568354845047,
+          "confidence": 0.5196965503190765,
+          "residue_count": 218,
+          "atom_count": 1734
+        }
+      ]
+    },
+    "8E7Y": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "B",
+          "centroid": [
+            -12.572397358943562,
+            5.593659863945585,
+            -17.59694797919157
+          ],
+          "volume": 57620.109375,
+          "druggability": 0.704910933971405,
+          "confidence": 0.5275422593031753,
+          "residue_count": 312,
+          "atom_count": 2499
+        }
+      ]
+    },
+    "8F1Z": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            8.64396953696183,
+            -59.02206417546714,
+            -25.077694963444408
+          ],
+          "volume": 59777.578125,
+          "druggability": 0.6815535426139832,
+          "confidence": 0.5192226667257948,
+          "residue_count": 306,
+          "atom_count": 2462
+        }
+      ]
+    },
+    "8S32": {
+      "num_pockets": 1,
+      "pockets": [
+        {
+          "rank": 1,
+          "chain": "A",
+          "centroid": [
+            158.7237901109623,
+            158.6768004301174,
+            158.1298742364559
+          ],
+          "volume": 1313808.1875,
+          "druggability": 0.661945104598999,
+          "confidence": 0.5182912423549761,
+          "residue_count": 7487,
+          "atom_count": 55334
+        }
+      ]
+    }
+  },
+  "total_pockets": 50
+}
