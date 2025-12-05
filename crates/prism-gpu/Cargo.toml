@@ -40,6 +40,15 @@ hex = { workspace = true }
 # Random number generation
 rand = { workspace = true }
 
+# NVML for GPU telemetry
+nvml-wrapper = "0.10"
+
+# Timestamps for telemetry
+chrono = "0.4"
+
+# Safe byte casting for GPU struct transfers
+bytemuck = { version = "1.14", features = ["derive"] }
+
 [dev-dependencies]
 # Testing utilities
 env_logger = { workspace = true }
