@@ -12,6 +12,7 @@
 //! - World-class allosteric site detection (4-stage pipeline)
 
 pub mod allosteric;
+pub mod config;
 pub mod features;
 pub mod graph;
 pub mod output;
@@ -26,10 +27,16 @@ pub mod unified;
 pub mod validation;
 
 // Re-exports
+pub use output::{
+    GpuTelemetryData, write_publication_json, write_publication_json_with_telemetry,
+};
 pub use allosteric::{
     AllostericDetectionConfig, AllostericDetectionOutput, AllostericDetector, AllostericPocket,
     AllostericDetectionType, ConfidenceAssessment, CoverageGap, Domain, DomainInterface,
     HingeRegion, MultiModuleEvidence,
+};
+pub use config::{
+    DetectionMode, DruggabilityWeights, ProvenanceLevel, QualityPreset, UnifiedHybridConfig,
 };
 pub use graph::{GraphConfig, ProteinGraph, ProteinGraphBuilder};
 pub use pocket::{Pocket, PocketDetector, PocketProperties, PrecisionMode};
@@ -368,6 +375,572 @@ impl PrismLbs {
 
         Ok(pockets)
     }
+
+    /// MEGA-BATCH GPU: Process ALL structures in a SINGLE kernel launch
+    ///
+    /// This is the ULTIMATE batch processing mode:
+    /// - ALL structures packed into contiguous GPU arrays
+    /// - SINGLE kernel launch for the entire batch
+    /// - L1 cache optimization with __ldg() intrinsics
+    /// - Register optimization with __launch_bounds__(256, 2)
+    ///
+    /// Target: 221 structures in <100ms (20-50x faster than sequential)
+    #[cfg(feature = "cuda")]
+    pub fn predict_batch_true_gpu(
+        structures: &[ProteinStructure],
+    ) -> Result<Vec<(String, Vec<Pocket>)>> {
+        use prism_gpu::mega_fused_batch::{
+            MegaFusedBatchGpu, StructureInput, PackedBatch, MegaFusedConfig,
+        };
+        use prism_gpu::global_context::GlobalGpuContext;
+        use std::collections::HashMap;
+        use std::time::Instant;
+
+        let total_start = Instant::now();
+        let n_structures = structures.len();
+
+        if n_structures == 0 {
+            return Ok(Vec::new());
+        }
+
+        // CHUNKING: Process in batches of MAX_CHUNK_SIZE to avoid GPU memory overflow
+        // 220 structures with 1.4M atoms is too large for a single kernel launch
+        const MAX_CHUNK_SIZE: usize = 32;
+        let n_chunks = (n_structures + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;
+        log::info!("MEGA-BATCH GPU: Processing {} structures in {} chunks of {} max",
+                   n_structures, n_chunks, MAX_CHUNK_SIZE);
+
+        // 1. Convert all structures to StructureInput format
+        let convert_start = Instant::now();
+        let mut inputs: Vec<StructureInput> = Vec::with_capacity(n_structures);
+
+        for structure in structures {
+            let id = structure.title.clone();
+            let n_residues = structure.residues.len();
+
+            // Flatten atoms to [x0, y0, z0, x1, y1, z1, ...]
+            let atoms: Vec<f32> = structure.atoms.iter()
+                .flat_map(|a| [a.coord[0] as f32, a.coord[1] as f32, a.coord[2] as f32])
+                .collect();
+
+            // Build residue→atom map for O(1) lookups
+            let mut residue_atom_map: HashMap<(i32, char), Vec<usize>> = HashMap::new();
+            for (atom_idx, atom) in structure.atoms.iter().enumerate() {
+                residue_atom_map
+                    .entry((atom.residue_seq, atom.chain_id))
+                    .or_insert_with(Vec::new)
+                    .push(atom_idx);
+            }
+
+            // CA atom indices for each residue
+            let ca_indices: Vec<i32> = structure.residues.iter()
+                .map(|res| {
+                    structure.atoms.iter().position(|a| {
+                        a.residue_seq == res.seq_number
+                            && a.chain_id == res.chain_id
+                            && a.name == "CA"
+                    })
+                    .map(|i| i as i32)
+                    .unwrap_or(-1)
+                })
+                .collect();
+
+            // Per-residue features
+            let conservation: Vec<f32> = structure.residues.iter()
+                .map(|r| r.conservation_score as f32)
+                .collect();
+
+            let mut bfactor: Vec<f32> = Vec::with_capacity(n_residues);
+            let mut burial: Vec<f32> = Vec::with_capacity(n_residues);
+
+            for res in &structure.residues {
+                if let Some(res_atom_indices) = residue_atom_map.get(&(res.seq_number, res.chain_id)) {
+                    if res_atom_indices.is_empty() {
+                        bfactor.push(0.5);
+                        burial.push(0.5);
+                    } else {
+                        let avg_bfactor: f64 = res_atom_indices.iter()
+                            .map(|&i| structure.atoms[i].b_factor)
+                            .sum::<f64>() / res_atom_indices.len() as f64;
+                        bfactor.push((avg_bfactor / 100.0).clamp(0.0, 1.0) as f32);
+
+                        let avg_sasa: f64 = res_atom_indices.iter()
+                            .map(|&i| structure.atoms[i].sasa)
+                            .sum::<f64>() / res_atom_indices.len() as f64;
+                        burial.push((1.0 - (avg_sasa / 150.0).clamp(0.0, 1.0)) as f32);
+                    }
+                } else {
+                    bfactor.push(0.5);
+                    burial.push(0.5);
+                }
+            }
+
+            inputs.push(StructureInput {
+                id,
+                atoms,
+                ca_indices,
+                conservation,
+                bfactor,
+                burial,
+            });
+        }
+        log::debug!("Structure conversion: {:?}", convert_start.elapsed());
+
+        // 2. Get batch kernel from GlobalGpuContext (once)
+        let global_gpu = GlobalGpuContext::try_get()
+            .map_err(|e| anyhow::anyhow!("Batch GPU requires GlobalGpuContext: {}", e))?;
+
+        let ptx_dir = std::env::var("PRISM_PTX_DIR").unwrap_or_else(|_| "target/ptx".to_string());
+        let mut batch_gpu = MegaFusedBatchGpu::new(global_gpu.context().device().clone(), std::path::Path::new(&ptx_dir))
+            .map_err(|e| anyhow::anyhow!("Failed to load batch kernel: {}", e))?;
+
+        let config = MegaFusedConfig::screening();
+
+        // 3. Process structures in chunks to avoid GPU memory overflow
+        use prism_gpu::mega_fused_batch::BatchStructureOutput;
+        let mut all_chunk_outputs: Vec<BatchStructureOutput> = Vec::with_capacity(n_structures);
+        let mut total_kernel_time_us = 0u64;
+
+        for (chunk_idx, chunk_inputs) in inputs.chunks(MAX_CHUNK_SIZE).enumerate() {
+            let chunk_start = Instant::now();
+
+            // Pack this chunk
+            let packed = PackedBatch::from_structures(chunk_inputs)
+                .map_err(|e| anyhow::anyhow!("Failed to pack chunk {}: {}", chunk_idx, e))?;
+
+            // Run kernel on this chunk
+            let batch_output = batch_gpu.detect_pockets_batch(&packed, &config)
+                .map_err(|e| anyhow::anyhow!("Chunk {} kernel failed: {}", chunk_idx, e))?;
+
+            total_kernel_time_us += batch_output.kernel_time_us;
+
+            // Collect outputs
+            all_chunk_outputs.extend(batch_output.structures);
+
+            log::info!("Chunk {}/{}: {} structures in {:?} ({}µs kernel)",
+                chunk_idx + 1, n_chunks, chunk_inputs.len(),
+                chunk_start.elapsed(), batch_output.kernel_time_us);
+
+            // WSL2 dxg driver stability: small delay between chunks to prevent driver overload
+            // This adds ~15 seconds total for 155 chunks but prevents hangs
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        log::info!("All chunks complete: {} structures, total kernel time {}µs",
+            n_structures, total_kernel_time_us);
+
+        // 4. Convert batch output to per-structure Pockets
+        let convert_back_start = Instant::now();
+        let mut results: Vec<(String, Vec<Pocket>)> = Vec::with_capacity(n_structures);
+
+        for (struct_idx, struct_output) in all_chunk_outputs.iter().enumerate() {
+            let structure = &structures[struct_idx];
+            let n_residues = structure.residues.len();
+
+            // Build residue→atom map for this structure
+            let mut residue_atom_map: HashMap<(i32, char), Vec<usize>> = HashMap::new();
+            for (atom_idx, atom) in structure.atoms.iter().enumerate() {
+                residue_atom_map
+                    .entry((atom.residue_seq, atom.chain_id))
+                    .or_insert_with(Vec::new)
+                    .push(atom_idx);
+            }
+
+            // KERNEL OUTPUTS CLUSTER IDs DIRECTLY via Union-Find Stage 7
+            // Group residues by their pocket_assignment value (1, 2, 3, etc.)
+            // Note: Mega-pocket prevention is handled in post-processing (MAX_BATCH_POCKET_RESIDUES=60)
+            let mut pocket_id_to_residues: HashMap<i32, Vec<usize>> = HashMap::new();
+            for (res_idx, &pocket_id) in struct_output.pocket_assignment.iter().enumerate() {
+                if pocket_id > 0 && struct_output.consensus_scores[res_idx] > config.consensus_threshold {
+                    pocket_id_to_residues
+                        .entry(pocket_id)
+                        .or_insert_with(Vec::new)
+                        .push(res_idx);
+                }
+            }
+
+            // Convert each pocket cluster to a Pocket struct
+            // MEGA-POCKET PREVENTION: Split clusters with >60 residues
+            const MAX_BATCH_POCKET_RESIDUES: usize = 60;
+
+            let mut pockets: Vec<Pocket> = Vec::new();
+            for (_, mut residue_indices) in pocket_id_to_residues.into_iter() {
+                if residue_indices.is_empty() {
+                    continue;
+                }
+
+                // If cluster is too large, take only the highest-scoring residues
+                if residue_indices.len() > MAX_BATCH_POCKET_RESIDUES {
+                    // Sort by consensus score and take top MAX_BATCH_POCKET_RESIDUES
+                    residue_indices.sort_by(|&a, &b| {
+                        struct_output.consensus_scores[b]
+                            .partial_cmp(&struct_output.consensus_scores[a])
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    residue_indices.truncate(MAX_BATCH_POCKET_RESIDUES);
+                }
+
+                let mut atom_indices: Vec<usize> = Vec::new();
+                let mut centroid = [0.0f64, 0.0, 0.0];
+                let mut total_hydro = 0.0;
+                let mut total_depth = 0.0;
+                let mut total_sasa = 0.0;
+                let mut total_flex = 0.0;
+                let mut total_cons = 0.0;
+                let mut donors = 0usize;
+                let mut acceptors = 0usize;
+
+                for &res_idx in &residue_indices {
+                    let res = &structure.residues[res_idx];
+                    if let Some(res_atom_indices) = residue_atom_map.get(&(res.seq_number, res.chain_id)) {
+                        for &atom_idx in res_atom_indices {
+                            let atom = &structure.atoms[atom_idx];
+                            atom_indices.push(atom_idx);
+                            centroid[0] += atom.coord[0];
+                            centroid[1] += atom.coord[1];
+                            centroid[2] += atom.coord[2];
+                            total_hydro += atom.hydrophobicity;
+                            total_depth += atom.depth;
+                            total_sasa += atom.sasa;
+                            total_flex += atom.b_factor;
+                            donors += usize::from(atom.is_hbond_donor());
+                            acceptors += usize::from(atom.is_hbond_acceptor());
+                        }
+                    }
+                    total_cons += structure.residues[res_idx].conservation_score;
+                }
+
+                if atom_indices.is_empty() {
+                    continue;
+                }
+
+                let count = atom_indices.len() as f64;
+                let residue_count = residue_indices.len();
+                centroid[0] /= count;
+                centroid[1] /= count;
+                centroid[2] /= count;
+
+                // Simplified volume (bounding box for speed)
+                let volume = pocket::geometry::bounding_box_volume(structure, &atom_indices);
+                let enc = pocket::geometry::enclosure_ratio(structure, &atom_indices);
+
+                let avg_consensus = residue_indices.iter()
+                    .map(|&i| struct_output.consensus_scores[i])
+                    .sum::<f32>() / residue_indices.len() as f32;
+                let avg_confidence = residue_indices.iter()
+                    .map(|&i| struct_output.confidence[i] as f32)
+                    .sum::<f32>() / residue_indices.len() as f32;
+                let avg_centrality = residue_indices.iter()
+                    .map(|&i| struct_output.centrality[i])
+                    .sum::<f32>() / residue_indices.len() as f32;
+
+                let drugg_total = (avg_consensus as f64 * 0.4 + avg_confidence as f64 / 2.0 * 0.3 + avg_centrality as f64 * 0.3).clamp(0.0, 1.0);
+                let classification = if drugg_total >= 0.7 {
+                    scoring::DrugabilityClass::HighlyDruggable
+                } else if drugg_total >= 0.5 {
+                    scoring::DrugabilityClass::Druggable
+                } else if drugg_total >= 0.3 {
+                    scoring::DrugabilityClass::DifficultTarget
+                } else {
+                    scoring::DrugabilityClass::Undruggable
+                };
+
+                let pocket = Pocket {
+                    atom_indices,
+                    residue_indices,
+                    centroid,
+                    volume,
+                    enclosure_ratio: enc,
+                    mean_hydrophobicity: total_hydro / count,
+                    mean_sasa: total_sasa / count,
+                    mean_depth: total_depth / count,
+                    mean_flexibility: total_flex / count,
+                    mean_conservation: total_cons / residue_count as f64,
+                    persistence_score: avg_centrality as f64,
+                    hbond_donors: donors,
+                    hbond_acceptors: acceptors,
+                    druggability_score: DruggabilityScore {
+                        total: drugg_total,
+                        classification,
+                        components: scoring::Components {
+                            volume: volume / 1000.0,
+                            hydro: total_hydro / count,
+                            enclosure: enc,
+                            depth: (total_depth / count).clamp(0.0, 1.0),
+                            hbond: (donors + acceptors) as f64 / count.max(1.0),
+                            flex: (total_flex / count / 100.0).clamp(0.0, 1.0),
+                            cons: total_cons / residue_count as f64,
+                            topo: avg_centrality as f64,
+                        },
+                    },
+                    boundary_atoms: Vec::new(),
+                    mean_electrostatic: 0.0,
+                    gnn_embedding: Vec::new(),
+                    gnn_druggability: 0.0,
+                };
+
+                if pocket.volume >= 50.0 && pocket.atom_indices.len() >= 5 {
+                    pockets.push(pocket);
+                }
+            }
+
+            // Sort by druggability
+            pockets.sort_by(|a, b| b.druggability_score.total.partial_cmp(&a.druggability_score.total).unwrap_or(std::cmp::Ordering::Equal));
+            pockets.truncate(20);
+
+            results.push((struct_output.id.clone(), pockets));
+        }
+        log::debug!("Result conversion: {:?}", convert_back_start.elapsed());
+
+        let (allocs, reuses) = batch_gpu.buffer_pool_stats();
+        log::info!(
+            "MEGA-BATCH COMPLETE: {} structures in {:?} (buffer allocs: {}, reuses: {})",
+            n_structures, total_start.elapsed(), allocs, reuses
+        );
+
+        Ok(results)
+    }
+
+    /// MEGA-BATCH WITH GROUND TRUTH VALIDATION (v2.0)
+    /// Runs GPU-fused pocket detection AND computes AUC-ROC, AUPRC, MCC, F1 on GPU
+    #[cfg(feature = "cuda")]
+    pub fn predict_batch_with_ground_truth(
+        structures: &[ProteinStructure],
+        ground_truth: &std::collections::HashMap<String, Vec<usize>>,
+    ) -> Result<BatchValidationResult> {
+        use prism_gpu::mega_fused_batch::{
+            MegaFusedBatchGpu, StructureInput, StructureInputWithGT, PackedBatchWithGT,
+            MegaFusedConfig, BatchMetricsOutput, AggregateMetrics,
+        };
+        use prism_gpu::global_context::GlobalGpuContext;
+        use std::collections::HashMap;
+        use std::time::Instant;
+
+        let total_start = Instant::now();
+        let n_structures = structures.len();
+
+        if n_structures == 0 {
+            return Ok(BatchValidationResult {
+                pockets: Vec::new(),
+                per_structure_metrics: Vec::new(),
+                aggregate: AggregateMetrics::default(),
+                kernel_time_us: 0,
+            });
+        }
+
+        log::info!("═══════════════════════════════════════════════════════════════════");
+        log::info!("  GPU-FUSED VALIDATION MODE (v2.0)");
+        log::info!("  Structures: {}", n_structures);
+        log::info!("  Ground truth entries: {}", ground_truth.len());
+        log::info!("═══════════════════════════════════════════════════════════════════");
+
+        // 1. Convert structures to StructureInputWithGT
+        let mut inputs_with_gt: Vec<StructureInputWithGT> = Vec::with_capacity(n_structures);
+
+        for structure in structures {
+            // Use pdb_id if available, otherwise extract from title/filename
+            let pdb_id = structure.pdb_id.clone()
+                .map(|id| id.to_lowercase())
+                .unwrap_or_else(|| {
+                    // Fallback: try to extract 4-letter PDB ID from title
+                    structure.title.split_whitespace()
+                        .find(|s| s.len() == 4 && s.chars().all(|c| c.is_alphanumeric()))
+                        .map(|s| s.to_lowercase())
+                        .unwrap_or_else(|| structure.title.split_whitespace().next().unwrap_or("unknown").to_lowercase())
+                });
+            let n_residues = structure.residues.len();
+            log::debug!("Structure PDB ID: {} ({} residues)", pdb_id, n_residues);
+
+            // Flatten atoms
+            let atoms: Vec<f32> = structure.atoms.iter()
+                .flat_map(|a| [a.coord[0] as f32, a.coord[1] as f32, a.coord[2] as f32])
+                .collect();
+
+            // Build residue→atom map
+            let mut residue_atom_map: HashMap<(i32, char), Vec<usize>> = HashMap::new();
+            for (atom_idx, atom) in structure.atoms.iter().enumerate() {
+                residue_atom_map
+                    .entry((atom.residue_seq, atom.chain_id))
+                    .or_insert_with(Vec::new)
+                    .push(atom_idx);
+            }
+
+            // CA indices
+            let ca_indices: Vec<i32> = structure.residues.iter()
+                .map(|res| {
+                    structure.atoms.iter().position(|a| {
+                        a.residue_seq == res.seq_number
+                            && a.chain_id == res.chain_id
+                            && a.name == "CA"
+                    })
+                    .map(|i| i as i32)
+                    .unwrap_or(-1)
+                })
+                .collect();
+
+            // Per-residue features
+            let conservation: Vec<f32> = structure.residues.iter()
+                .map(|r| r.conservation_score as f32)
+                .collect();
+
+            let mut bfactor: Vec<f32> = Vec::with_capacity(n_residues);
+            let mut burial: Vec<f32> = Vec::with_capacity(n_residues);
+
+            for res in &structure.residues {
+                if let Some(res_atom_indices) = residue_atom_map.get(&(res.seq_number, res.chain_id)) {
+                    if res_atom_indices.is_empty() {
+                        bfactor.push(0.5);
+                        burial.push(0.5);
+                    } else {
+                        let avg_bfactor: f64 = res_atom_indices.iter()
+                            .map(|&i| structure.atoms[i].b_factor)
+                            .sum::<f64>() / res_atom_indices.len() as f64;
+                        bfactor.push((avg_bfactor / 100.0).clamp(0.0, 1.0) as f32);
+
+                        let avg_sasa: f64 = res_atom_indices.iter()
+                            .map(|&i| structure.atoms[i].sasa)
+                            .sum::<f64>() / res_atom_indices.len() as f64;
+                        burial.push((1.0 - (avg_sasa / 150.0).clamp(0.0, 1.0)) as f32);
+                    }
+                } else {
+                    bfactor.push(0.5);
+                    burial.push(0.5);
+                }
+            }
+
+            // Build ground truth mask (convert PDB sequence numbers to 0-indexed residue positions)
+            let gt_residue_seq_nums = ground_truth.get(&pdb_id);
+
+            // Create a mapping from PDB residue sequence number to 0-indexed position
+            let seq_num_to_idx: HashMap<i32, usize> = structure.residues.iter()
+                .enumerate()
+                .map(|(idx, res)| (res.seq_number, idx))
+                .collect();
+
+            // Convert GT sequence numbers to 0-indexed positions
+            let gt_indices: std::collections::HashSet<usize> = gt_residue_seq_nums
+                .map(|seq_nums| {
+                    seq_nums.iter()
+                        .filter_map(|&seq_num| seq_num_to_idx.get(&(seq_num as i32)).copied())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let gt_pocket_mask: Vec<u8> = (0..n_residues)
+                .map(|i| if gt_indices.contains(&i) { 1 } else { 0 })
+                .collect();
+
+            let gt_count = gt_indices.len();
+            if gt_count > 0 {
+                log::debug!("Structure {}: {} GT residues out of {} (mapped from {} sequence numbers)",
+                    pdb_id, gt_count, n_residues,
+                    gt_residue_seq_nums.map(|v| v.len()).unwrap_or(0));
+            } else if gt_residue_seq_nums.is_some() {
+                log::warn!("Structure {}: GT has {} sequence numbers but none mapped to residue positions",
+                    pdb_id, gt_residue_seq_nums.map(|v| v.len()).unwrap_or(0));
+            }
+
+            let base = StructureInput {
+                id: pdb_id.clone(),
+                atoms,
+                ca_indices,
+                conservation,
+                bfactor,
+                burial,
+            };
+
+            inputs_with_gt.push(StructureInputWithGT {
+                base,
+                gt_pocket_mask,
+            });
+        }
+
+        // 2. Get batch kernel from GlobalGpuContext
+        let global_gpu = GlobalGpuContext::try_get()
+            .map_err(|e| anyhow::anyhow!("Batch GPU requires GlobalGpuContext: {}", e))?;
+
+        let ptx_dir = std::env::var("PRISM_PTX_DIR").unwrap_or_else(|_| "target/ptx".to_string());
+        let mut batch_gpu = MegaFusedBatchGpu::new(global_gpu.context().device().clone(), std::path::Path::new(&ptx_dir))
+            .map_err(|e| anyhow::anyhow!("Failed to load batch kernel: {}", e))?;
+
+        if !batch_gpu.is_metrics_available() {
+            anyhow::bail!("v2.0 metrics kernel not loaded - ensure mega_fused_batch.ptx contains mega_fused_pocket_detection_batch_with_metrics");
+        }
+
+        let config = MegaFusedConfig::screening();
+
+        // 3. Process in chunks with ground truth
+        const MAX_CHUNK_SIZE: usize = 32;
+        let n_chunks = (n_structures + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;
+
+        let mut all_metrics: Vec<BatchMetricsOutput> = Vec::with_capacity(n_structures);
+        let mut total_kernel_time_us = 0u64;
+
+        for (chunk_idx, chunk_inputs) in inputs_with_gt.chunks(MAX_CHUNK_SIZE).enumerate() {
+            let chunk_start = Instant::now();
+
+            // Pack with ground truth
+            let packed = PackedBatchWithGT::from_structures_with_gt(chunk_inputs)
+                .map_err(|e| anyhow::anyhow!("Failed to pack chunk {}: {}", chunk_idx, e))?;
+
+            // Run v2.0 metrics kernel
+            let output = batch_gpu.detect_pockets_batch_with_metrics(&packed, &config)
+                .map_err(|e| anyhow::anyhow!("Chunk {} metrics kernel failed: {}", chunk_idx, e))?;
+
+            total_kernel_time_us += output.kernel_time_us;
+            all_metrics.extend(output.metrics);
+
+            log::info!("Chunk {}/{}: {} structures in {:?} | F1={:.4} MCC={:.4}",
+                chunk_idx + 1, n_chunks, chunk_inputs.len(),
+                chunk_start.elapsed(), output.aggregate.mean_f1, output.aggregate.mean_mcc);
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // 4. Compute final aggregate metrics
+        let n = all_metrics.len() as f32;
+        let aggregate = if n > 0.0 {
+            AggregateMetrics {
+                mean_f1: all_metrics.iter().map(|m| m.f1_score).sum::<f32>() / n,
+                mean_mcc: all_metrics.iter().map(|m| m.mcc).sum::<f32>() / n,
+                mean_auc_roc: all_metrics.iter().map(|m| m.auc_roc).sum::<f32>() / n,
+                mean_auprc: all_metrics.iter().map(|m| m.auprc).sum::<f32>() / n,
+                mean_precision: all_metrics.iter().map(|m| m.precision).sum::<f32>() / n,
+                mean_recall: all_metrics.iter().map(|m| m.recall).sum::<f32>() / n,
+            }
+        } else {
+            AggregateMetrics::default()
+        };
+
+        log::info!("═══════════════════════════════════════════════════════════════════");
+        log::info!("  GPU-FUSED VALIDATION COMPLETE");
+        log::info!("  Structures: {}", n_structures);
+        log::info!("  Total kernel time: {}µs", total_kernel_time_us);
+        log::info!("  ────────────────────────────────────────────────────────────────");
+        log::info!("  MEAN F1:       {:.4}", aggregate.mean_f1);
+        log::info!("  MEAN MCC:      {:.4}", aggregate.mean_mcc);
+        log::info!("  MEAN AUC-ROC:  {:.4}", aggregate.mean_auc_roc);
+        log::info!("  MEAN AUPRC:    {:.4}", aggregate.mean_auprc);
+        log::info!("  MEAN PRECISION:{:.4}", aggregate.mean_precision);
+        log::info!("  MEAN RECALL:   {:.4}", aggregate.mean_recall);
+        log::info!("═══════════════════════════════════════════════════════════════════");
+
+        Ok(BatchValidationResult {
+            pockets: Vec::new(), // TODO: convert batch output to pockets if needed
+            per_structure_metrics: all_metrics,
+            aggregate,
+            kernel_time_us: total_kernel_time_us,
+        })
+    }
+}
+
+/// Result of batch validation with ground truth
+#[cfg(feature = "cuda")]
+pub struct BatchValidationResult {
+    pub pockets: Vec<(String, Vec<Pocket>)>,
+    pub per_structure_metrics: Vec<prism_gpu::mega_fused_batch::BatchMetricsOutput>,
+    pub aggregate: prism_gpu::mega_fused_batch::AggregateMetrics,
+    pub kernel_time_us: u64,
 }
 
 /// Error types for PRISM-LBS
@@ -569,11 +1142,56 @@ fn merge_two_pockets(mut a: Pocket, b: Pocket) -> Pocket {
 fn expand_pocket_residues(pocket: &mut Pocket, atoms: &[Atom], expansion_radius: f64, max_residues: usize) {
     use std::collections::HashSet;
 
+    // MEGA-POCKET PREVENTION: Trim oversized pockets BEFORE expansion
+    // This fixes issue where initial Voronoi detection creates mega-pockets (e.g., 290 residues)
+    // that were just skipped by the old code path
+    if pocket.residue_indices.len() > max_residues {
+        log::debug!(
+            "Trimming mega-pocket from {} to {} residues (using distance to centroid)",
+            pocket.residue_indices.len(),
+            max_residues
+        );
+
+        // Calculate distance to centroid for each residue and keep closest ones
+        let centroid = pocket.centroid;
+        let mut residue_distances: Vec<(usize, f64)> = pocket.residue_indices.iter()
+            .map(|&res_idx| {
+                // Find minimum distance from any atom in this residue to centroid
+                let min_dist = atoms.iter()
+                    .filter(|a| a.residue_seq as usize == res_idx)
+                    .map(|a| {
+                        let dx = a.coord[0] - centroid[0];
+                        let dy = a.coord[1] - centroid[1];
+                        let dz = a.coord[2] - centroid[2];
+                        (dx * dx + dy * dy + dz * dz).sqrt()
+                    })
+                    .fold(f64::MAX, |a, b| a.min(b));
+                (res_idx, min_dist)
+            })
+            .collect();
+
+        // Sort by distance (closest first) and keep top max_residues
+        residue_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        pocket.residue_indices = residue_distances.into_iter()
+            .take(max_residues)
+            .map(|(idx, _)| idx)
+            .collect();
+        pocket.residue_indices.sort();
+
+        // Recalculate atom_indices for the trimmed pocket
+        let residue_set: HashSet<usize> = pocket.residue_indices.iter().copied().collect();
+        pocket.atom_indices.retain(|&atom_idx| {
+            atoms.get(atom_idx)
+                .map(|a| residue_set.contains(&(a.residue_seq as usize)))
+                .unwrap_or(false)
+        });
+    }
+
     let current_residues: HashSet<usize> = pocket.residue_indices.iter().copied().collect();
     let mut all_residues = current_residues.clone();
     let initial_count = all_residues.len();
 
-    // Skip expansion if pocket is already at max size
+    // Skip expansion if pocket is already at max size (now reached via trimming or natural size)
     if initial_count >= max_residues {
         return;
     }

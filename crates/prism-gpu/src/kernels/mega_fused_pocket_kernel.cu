@@ -225,52 +225,159 @@ __device__ __forceinline__ int get_bin(float score) {
 }
 
 //=============================================================================
-// CONSTANT MEMORY (Pre-loaded neural network weights)
+// CONSTANT MEMORY (DETERMINISTIC biologically-structured weights)
+// NO TRAINING - NO RANDOMNESS - FULLY REPRODUCIBLE
 //=============================================================================
 
-// Reservoir weights - initialized once at startup, used for all structures
+// Reservoir weights - DETERMINISTIC initialization using biological patterns
 __constant__ float c_reservoir_input_weights[RESERVOIR_DIM * N_INPUT_FEATURES];
 __constant__ float c_branch_weights[N_BRANCHES][RESERVOIR_DIM];
 __constant__ float c_readout_weights[RESERVOIR_DIM];
+
+// Host function to initialize deterministic reservoir weights
+// Uses sine/cosine basis for smooth, biologically-plausible connectivity
+extern "C" void init_bio_reservoir_weights(
+    float* h_input_weights,   // [RESERVOIR_DIM * N_INPUT_FEATURES]
+    float* h_branch_weights,  // [N_BRANCHES * RESERVOIR_DIM]
+    float* h_readout_weights  // [RESERVOIR_DIM]
+) {
+    const float tau = 8.0f;  // Exponential decay constant
+    const float spectral_radius = 0.95f;  // Edge of chaos
+
+    // Input weights: deterministic sine/cosine basis
+    // Mimics biological input mapping with smooth receptive fields
+    for (int i = 0; i < RESERVOIR_DIM; i++) {
+        for (int f = 0; f < N_INPUT_FEATURES; f++) {
+            float phase = (float)i * 0.1f + (float)f * 0.7f;
+            float amplitude = 1.0f / (1.0f + expf((float)f * 0.3f));
+            h_input_weights[i * N_INPUT_FEATURES + f] = sinf(phase) * amplitude;
+        }
+    }
+
+    // Branch weights: local + long-range connectivity pattern
+    // Branch 0: Local excitatory (exp decay)
+    // Branch 1: Local inhibitory (exp decay, negative)
+    // Branch 2: Long-range excitatory (sparse, positive)
+    // Branch 3: Global context (uniform, weak)
+    for (int b = 0; b < N_BRANCHES; b++) {
+        for (int i = 0; i < RESERVOIR_DIM; i++) {
+            float weight = 0.0f;
+            switch (b) {
+                case 0:  // Local excitatory
+                    weight = expf(-(float)((i % 32)) / tau) * 0.4f;
+                    break;
+                case 1:  // Local inhibitory
+                    weight = -expf(-(float)((i % 32)) / tau) * 0.3f;
+                    break;
+                case 2:  // Long-range (deterministic hash)
+                    weight = ((i * 2654435761u) % 7 == 0) ? 0.3f : 0.0f;
+                    break;
+                case 3:  // Global context
+                    weight = 0.1f / (float)RESERVOIR_DIM;
+                    break;
+            }
+            h_branch_weights[b * RESERVOIR_DIM + i] = weight * spectral_radius;
+        }
+    }
+
+    // Readout weights: uniform initialization (will be refined by closed-form if GT available)
+    // For now, use deterministic pattern based on position
+    for (int i = 0; i < RESERVOIR_DIM; i++) {
+        // Emphasize middle-range features (binding sites often have intermediate properties)
+        float position_factor = 1.0f - fabsf((float)i / RESERVOIR_DIM - 0.5f) * 2.0f;
+        h_readout_weights[i] = position_factor / (float)RESERVOIR_DIM;
+    }
+}
 
 // Note: Consensus weights and signal bonuses are now in MegaFusedParams
 // to allow runtime tuning without recompilation
 
 //=============================================================================
-// SHARED MEMORY STRUCTURE
+// TDA CONSTANTS (Integrated for 80-dim features)
+//=============================================================================
+
+#define TDA_NUM_RADII 3
+#define TDA_FEATURES_PER_RADIUS 16
+#define TDA_FEATURE_COUNT (TDA_NUM_RADII * TDA_FEATURES_PER_RADIUS)  // 48
+#define BASE_FEATURES 32
+#define TOTAL_COMBINED_FEATURES 80  // 48 TDA + 32 base
+#define TDA_MAX_NEIGHBORS 64
+
+// TDA radii in Angstroms
+#define TDA_RADIUS_0 8.0f
+#define TDA_RADIUS_1 12.0f
+#define TDA_RADIUS_2 16.0f
+
+// TDA persistence scales
+#define TDA_SCALE_0 3.0f
+#define TDA_SCALE_1 5.0f
+#define TDA_SCALE_2 7.0f
+#define TDA_SCALE_3 9.0f
+
+// Feature indices within each TDA radius block
+#define TDA_BETTI0_SCALE0 0
+#define TDA_BETTI0_SCALE1 1
+#define TDA_BETTI0_SCALE2 2
+#define TDA_BETTI0_SCALE3 3
+#define TDA_BETTI1_SCALE0 4
+#define TDA_BETTI1_SCALE1 5
+#define TDA_BETTI1_SCALE2 6
+#define TDA_BETTI1_SCALE3 7
+#define TDA_TOTAL_PERSISTENCE 8
+#define TDA_MAX_PERSISTENCE 9
+#define TDA_PERSISTENCE_ENTROPY 10
+#define TDA_SIGNIFICANT_FEATURES 11
+#define TDA_DIR_PLUS_X 12
+#define TDA_DIR_PLUS_Y 13
+#define TDA_DIR_PLUS_Z 14
+#define TDA_ANISOTROPY 15
+
+//=============================================================================
+// SHARED MEMORY STRUCTURE (Extended for TDA Integration)
 //=============================================================================
 
 struct __align__(16) MegaFusedSharedMemory {
     // Stage 1: Distance/Contact (reused across stages)
     float distance_tile[TILE_SIZE][TILE_SIZE];
     float contact_tile[TILE_SIZE][TILE_SIZE];
-    
+
     // Stage 2: Coordinates and basic features
     float3 ca_coords[TILE_SIZE];
     float conservation[TILE_SIZE];
     float bfactor[TILE_SIZE];
     float burial[TILE_SIZE];
-    
+
     // Stage 3: Network analysis
     float degree[TILE_SIZE];
     float centrality[TILE_SIZE];
     float eigenvector[TILE_SIZE];
     float eigenvector_new[TILE_SIZE];
-    
+
+    // Stage 3.5: TDA Features (NEW - Fused integration)
+    float tda_features[TILE_SIZE][TDA_FEATURE_COUNT];  // 48 TDA features per residue
+
     // Stage 4: Reservoir state (256 dims split across threads)
     float reservoir_state[TILE_SIZE][8];  // 8 floats per residue (compressed)
-    
+
     // Stage 5: Consensus evidence
     float geometric_score[TILE_SIZE];
     float consensus_score[TILE_SIZE];
     int signal_mask[TILE_SIZE];
     int confidence[TILE_SIZE];
-    
+
     // Stage 6: Kempe chain tracking
     int pocket_assignment[TILE_SIZE];
     int chain_label[TILE_SIZE];
     float assignment_score[TILE_SIZE];
-    
+
+    // Combined output features (80-dim: 48 TDA + 32 base)
+    float combined_features[TILE_SIZE][TOTAL_COMBINED_FEATURES];
+
+    // TDA workspace (union-find for Betti computation)
+    int tda_parent[TDA_MAX_NEIGHBORS];
+    int tda_rank[TDA_MAX_NEIGHBORS];
+    float tda_neighbor_coords[TDA_MAX_NEIGHBORS * 3];
+
     // Scratch space
     float scratch[TILE_SIZE * 4];
 };
@@ -460,6 +567,210 @@ __device__ void stage3_network_centrality(
                                       params->centrality_eigenvector_weight * eigenvector_cent;
     }
     __syncthreads();  // ALL threads must reach this
+}
+
+//=============================================================================
+// STAGE 3.5: TDA TOPOLOGICAL FEATURE EXTRACTION (FUSED)
+// Computes 48-dim TDA features in shared memory without global memory round-trip
+//=============================================================================
+
+__device__ __forceinline__ int tda_find(int* parent, int x) {
+    while (parent[x] != x) {
+        x = parent[x];
+    }
+    return x;
+}
+
+__device__ __forceinline__ void tda_union(int* parent, int* rank_arr, int x, int y) {
+    int rx = tda_find(parent, x);
+    int ry = tda_find(parent, y);
+
+    if (rx != ry) {
+        if (rank_arr[rx] < rank_arr[ry]) {
+            parent[rx] = ry;
+        } else if (rank_arr[rx] > rank_arr[ry]) {
+            parent[ry] = rx;
+        } else {
+            parent[ry] = rx;
+            rank_arr[rx]++;
+        }
+    }
+}
+
+__device__ void stage3_5_tda_topological(
+    int n_residues,
+    int tile_idx,
+    MegaFusedSharedMemory* smem
+) {
+    int local_idx = threadIdx.x;
+    bool active = (local_idx < TILE_SIZE);
+
+    // TDA scales for persistence computation
+    const float scales[4] = {TDA_SCALE_0, TDA_SCALE_1, TDA_SCALE_2, TDA_SCALE_3};
+    const float radii[3] = {TDA_RADIUS_0, TDA_RADIUS_1, TDA_RADIUS_2};
+
+    // Initialize TDA features to zero
+    if (active) {
+        for (int f = 0; f < TDA_FEATURE_COUNT; f++) {
+            smem->tda_features[local_idx][f] = 0.0f;
+        }
+    }
+    __syncthreads();
+
+    // Each thread processes its own residue's TDA features
+    if (active) {
+        float3 center = smem->ca_coords[local_idx];
+
+        // Process each radius
+        for (int r = 0; r < TDA_NUM_RADII; r++) {
+            float radius = radii[r];
+
+            // Collect neighbors within this radius from the distance tile
+            int n_neighbors = 0;
+            for (int j = 0; j < TILE_SIZE && n_neighbors < TDA_MAX_NEIGHBORS; j++) {
+                if (j != local_idx) {
+                    float dist = smem->distance_tile[local_idx][j];
+                    if (dist > 0.0f && dist <= radius) {
+                        smem->tda_neighbor_coords[n_neighbors * 3 + 0] = smem->ca_coords[j].x;
+                        smem->tda_neighbor_coords[n_neighbors * 3 + 1] = smem->ca_coords[j].y;
+                        smem->tda_neighbor_coords[n_neighbors * 3 + 2] = smem->ca_coords[j].z;
+                        n_neighbors++;
+                    }
+                }
+            }
+
+            if (n_neighbors == 0) {
+                // No neighbors - zero features for this radius
+                continue;
+            }
+
+            // Compute Betti numbers at each scale
+            float betti0[4] = {0, 0, 0, 0};
+            float betti1[4] = {0, 0, 0, 0};
+
+            for (int s = 0; s < 4; s++) {
+                float threshold = scales[s];
+
+                // Initialize union-find
+                for (int i = 0; i < n_neighbors; i++) {
+                    smem->tda_parent[i] = i;
+                    smem->tda_rank[i] = 0;
+                }
+
+                // Build edges and union at this scale
+                int edge_count = 0;
+
+                for (int i = 0; i < n_neighbors; i++) {
+                    float x1 = smem->tda_neighbor_coords[i * 3 + 0];
+                    float y1 = smem->tda_neighbor_coords[i * 3 + 1];
+                    float z1 = smem->tda_neighbor_coords[i * 3 + 2];
+
+                    for (int j = i + 1; j < n_neighbors; j++) {
+                        float x2 = smem->tda_neighbor_coords[j * 3 + 0];
+                        float y2 = smem->tda_neighbor_coords[j * 3 + 1];
+                        float z2 = smem->tda_neighbor_coords[j * 3 + 2];
+
+                        float dx = x1 - x2;
+                        float dy = y1 - y2;
+                        float dz = z1 - z2;
+                        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+
+                        if (dist <= threshold) {
+                            tda_union(smem->tda_parent, smem->tda_rank, i, j);
+                            edge_count++;
+                        }
+                    }
+                }
+
+                // Count connected components (Betti-0)
+                int component_count = 0;
+                for (int i = 0; i < n_neighbors; i++) {
+                    if (smem->tda_parent[i] == i) {
+                        component_count++;
+                    }
+                }
+
+                betti0[s] = (float)component_count;
+
+                // Estimate Betti-1 using Euler characteristic
+                // β1 ≈ max(0, E - V + β0)
+                betti1[s] = fmaxf(0.0f, (float)(edge_count - n_neighbors) + betti0[s]);
+            }
+
+            // Store Betti numbers
+            int base = r * TDA_FEATURES_PER_RADIUS;
+            smem->tda_features[local_idx][base + TDA_BETTI0_SCALE0] = betti0[0];
+            smem->tda_features[local_idx][base + TDA_BETTI0_SCALE1] = betti0[1];
+            smem->tda_features[local_idx][base + TDA_BETTI0_SCALE2] = betti0[2];
+            smem->tda_features[local_idx][base + TDA_BETTI0_SCALE3] = betti0[3];
+            smem->tda_features[local_idx][base + TDA_BETTI1_SCALE0] = betti1[0];
+            smem->tda_features[local_idx][base + TDA_BETTI1_SCALE1] = betti1[1];
+            smem->tda_features[local_idx][base + TDA_BETTI1_SCALE2] = betti1[2];
+            smem->tda_features[local_idx][base + TDA_BETTI1_SCALE3] = betti1[3];
+
+            // Compute persistence features
+            float total_persistence = 0.0f;
+            float max_persistence = 0.0f;
+            float significant_count = 0.0f;
+
+            for (int s = 0; s < 3; s++) {
+                float died = betti0[s] - betti0[s + 1];
+                if (died > 0) {
+                    float persistence = scales[s + 1] - scales[s];
+                    total_persistence += died * persistence;
+                    max_persistence = fmaxf(max_persistence, persistence);
+                    if (persistence > 1.0f) {
+                        significant_count += died;
+                    }
+                }
+            }
+
+            // Entropy calculation
+            float entropy = 0.0f;
+            if (total_persistence > 0.0f) {
+                for (int s = 0; s < 3; s++) {
+                    float died = betti0[s] - betti0[s + 1];
+                    if (died > 0) {
+                        float persistence = scales[s + 1] - scales[s];
+                        float p = (died * persistence) / total_persistence;
+                        if (p > 0.0f) {
+                            entropy -= p * logf(p);
+                        }
+                    }
+                }
+            }
+
+            smem->tda_features[local_idx][base + TDA_TOTAL_PERSISTENCE] = total_persistence;
+            smem->tda_features[local_idx][base + TDA_MAX_PERSISTENCE] = max_persistence;
+            smem->tda_features[local_idx][base + TDA_PERSISTENCE_ENTROPY] = entropy;
+            smem->tda_features[local_idx][base + TDA_SIGNIFICANT_FEATURES] = significant_count;
+
+            // Directional features
+            int plus_x = 0, plus_y = 0, plus_z = 0;
+            for (int i = 0; i < n_neighbors; i++) {
+                if (smem->tda_neighbor_coords[i * 3 + 0] > center.x) plus_x++;
+                if (smem->tda_neighbor_coords[i * 3 + 1] > center.y) plus_y++;
+                if (smem->tda_neighbor_coords[i * 3 + 2] > center.z) plus_z++;
+            }
+
+            float n_f = (float)n_neighbors;
+            float dx = (float)plus_x / n_f;
+            float dy = (float)plus_y / n_f;
+            float dz = (float)plus_z / n_f;
+
+            smem->tda_features[local_idx][base + TDA_DIR_PLUS_X] = dx;
+            smem->tda_features[local_idx][base + TDA_DIR_PLUS_Y] = dy;
+            smem->tda_features[local_idx][base + TDA_DIR_PLUS_Z] = dz;
+
+            // Anisotropy
+            float mean = (dx + dy + dz) / 3.0f;
+            float var = ((dx - mean) * (dx - mean) +
+                        (dy - mean) * (dy - mean) +
+                        (dz - mean) * (dz - mean)) / 3.0f;
+            smem->tda_features[local_idx][base + TDA_ANISOTROPY] = sqrtf(var);
+        }
+    }
+    __syncthreads();
 }
 
 //=============================================================================
@@ -735,6 +1046,139 @@ __device__ void stage6_kempe_refinement(
 }
 
 //=============================================================================
+// STAGE 6.5: FEATURE COMBINATION (80-dim output)
+// Combines 48 TDA features with 32 base reservoir/analysis features
+// Single write to combined_features array in shared memory
+//=============================================================================
+
+__device__ void stage6_5_combine_features(
+    int n_residues,
+    int tile_idx,
+    MegaFusedSharedMemory* smem
+) {
+    int local_idx = threadIdx.x;
+    bool active = (local_idx < TILE_SIZE);
+
+    if (active) {
+        // First 48 features: TDA features (already computed in Stage 3.5)
+        for (int f = 0; f < TDA_FEATURE_COUNT; f++) {
+            smem->combined_features[local_idx][f] = smem->tda_features[local_idx][f];
+        }
+
+        // Next 32 features: Base reservoir/analysis features
+        // Feature 48-55: Reservoir state (8 dims)
+        for (int f = 0; f < 8; f++) {
+            smem->combined_features[local_idx][TDA_FEATURE_COUNT + f] = smem->reservoir_state[local_idx][f];
+        }
+
+        // Feature 56: Degree centrality (normalized)
+        float max_degree = 0.0f;
+        for (int j = 0; j < TILE_SIZE; j++) {
+            max_degree = fmaxf(max_degree, smem->degree[j]);
+        }
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 8] = smem->degree[local_idx] / (max_degree + 1e-8f);
+
+        // Feature 57: Eigenvector centrality
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 9] = fabsf(smem->eigenvector[local_idx]);
+
+        // Feature 58: Combined centrality
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 10] = smem->centrality[local_idx];
+
+        // Feature 59: Conservation
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 11] = smem->conservation[local_idx];
+
+        // Feature 60: B-factor (flexibility)
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 12] = smem->bfactor[local_idx];
+
+        // Feature 61: Burial depth
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 13] = smem->burial[local_idx];
+
+        // Feature 62: Geometric score
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 14] = smem->geometric_score[local_idx];
+
+        // Feature 63: Consensus score
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 15] = smem->consensus_score[local_idx];
+
+        // Feature 64: Signal count (normalized)
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 16] = (float)__popc(smem->signal_mask[local_idx]) / 4.0f;
+
+        // Feature 65: Confidence level (normalized)
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 17] = (float)smem->confidence[local_idx] / 2.0f;
+
+        // Feature 66: Pocket assignment (binary)
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 18] = (float)smem->pocket_assignment[local_idx];
+
+        // Feature 67: Assignment score (normalized)
+        float max_assign = 0.0f;
+        for (int j = 0; j < TILE_SIZE; j++) {
+            max_assign = fmaxf(max_assign, smem->assignment_score[j]);
+        }
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 19] = smem->assignment_score[local_idx] / (max_assign + 1e-8f);
+
+        // Features 68-71: Local contact statistics
+        float contact_sum = 0.0f;
+        float contact_max = 0.0f;
+        int contact_count = 0;
+        for (int j = 0; j < TILE_SIZE; j++) {
+            float c = smem->contact_tile[local_idx][j];
+            if (c > 0.1f) {
+                contact_sum += c;
+                contact_max = fmaxf(contact_max, c);
+                contact_count++;
+            }
+        }
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 20] = contact_sum;
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 21] = contact_max;
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 22] = (float)contact_count / TILE_SIZE;
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 23] = (contact_count > 0) ? contact_sum / contact_count : 0.0f;
+
+        // Features 72-75: Distance statistics
+        float dist_min = 1e10f;
+        float dist_sum = 0.0f;
+        int dist_count = 0;
+        for (int j = 0; j < TILE_SIZE; j++) {
+            if (j != local_idx) {
+                float d = smem->distance_tile[local_idx][j];
+                if (d > 0.0f) {
+                    dist_min = fminf(dist_min, d);
+                    dist_sum += d;
+                    dist_count++;
+                }
+            }
+        }
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 24] = (dist_min < 1e9f) ? dist_min / 20.0f : 0.0f;
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 25] = (dist_count > 0) ? dist_sum / (dist_count * 20.0f) : 0.0f;
+
+        // Features 76-79: Spatial position features (normalized)
+        float3 center = smem->ca_coords[local_idx];
+        float3 centroid = make_float3(0.0f, 0.0f, 0.0f);
+        for (int j = 0; j < TILE_SIZE; j++) {
+            centroid.x += smem->ca_coords[j].x;
+            centroid.y += smem->ca_coords[j].y;
+            centroid.z += smem->ca_coords[j].z;
+        }
+        centroid.x /= TILE_SIZE;
+        centroid.y /= TILE_SIZE;
+        centroid.z /= TILE_SIZE;
+
+        float dx = center.x - centroid.x;
+        float dy = center.y - centroid.y;
+        float dz = center.z - centroid.z;
+        float dist_to_center = sqrtf(dx*dx + dy*dy + dz*dz);
+
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 26] = dist_to_center / 50.0f;  // Normalized
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 27] = (dx / (dist_to_center + 1e-8f) + 1.0f) / 2.0f;  // X direction
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 28] = (dy / (dist_to_center + 1e-8f) + 1.0f) / 2.0f;  // Y direction
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 29] = (dz / (dist_to_center + 1e-8f) + 1.0f) / 2.0f;  // Z direction
+
+        // Features 80-31 (idx 30-31): Relative position in tile
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 30] = (float)local_idx / TILE_SIZE;
+        smem->combined_features[local_idx][TDA_FEATURE_COUNT + 31] = (float)(tile_idx * TILE_SIZE + local_idx) / 1000.0f;  // Global position (normalized)
+    }
+    __syncthreads();
+}
+
+//=============================================================================
 // STAGE 7: GPU-FUSED METRICS + HISTOGRAM COLLECTION (v2.0 FINAL)
 //=============================================================================
 
@@ -795,6 +1239,7 @@ mega_fused_pocket_detection(
     int* __restrict__ signal_mask_out,
     int* __restrict__ pocket_assignment_out,
     float* __restrict__ centrality_out,
+    float* __restrict__ combined_features_out,  // NEW: 80-dim features per residue
 
     // Runtime parameters (all tunable at launch time)
     const MegaFusedParams* __restrict__ params
@@ -830,6 +1275,11 @@ mega_fused_pocket_detection(
     stage3_network_centrality(n_residues, tile_idx, &smem, params);
 
     //=========================================================================
+    // STAGE 3.5: TDA Topological Features (48-dim) - FUSED in shared memory
+    //=========================================================================
+    stage3_5_tda_topological(n_residues, tile_idx, &smem);
+
+    //=========================================================================
     // STAGE 4: Dendritic Reservoir - uses params for branch weights
     //=========================================================================
     stage4_dendritic_reservoir(n_residues, tile_idx, &smem, params);
@@ -845,6 +1295,11 @@ mega_fused_pocket_detection(
     stage6_kempe_refinement(n_residues, tile_idx, &smem, params);
 
     //=========================================================================
+    // STAGE 6.5: Feature Combination (80-dim = 48 TDA + 32 base)
+    //=========================================================================
+    stage6_5_combine_features(n_residues, tile_idx, &smem);
+
+    //=========================================================================
     // WRITE OUTPUTS (Single global memory write)
     //=========================================================================
     if (local_idx < TILE_SIZE && global_idx < n_residues) {
@@ -853,6 +1308,12 @@ mega_fused_pocket_detection(
         signal_mask_out[global_idx] = smem.signal_mask[local_idx];
         pocket_assignment_out[global_idx] = smem.pocket_assignment[local_idx];
         centrality_out[global_idx] = smem.centrality[local_idx];
+
+        // Write 80-dim combined features (coalesced access)
+        for (int f = 0; f < TOTAL_COMBINED_FEATURES; f++) {
+            combined_features_out[global_idx * TOTAL_COMBINED_FEATURES + f] =
+                smem.combined_features[local_idx][f];
+        }
     }
 }
 
@@ -968,6 +1429,7 @@ cudaError_t launch_mega_fused_pocket_detection(
     int* d_signal_mask,
     int* d_pocket_assignment,
     float* d_centrality,
+    float* d_combined_features,  // NEW: 80-dim features per residue
 
     // Runtime params (device pointer)
     const MegaFusedParams* d_params,
@@ -992,6 +1454,7 @@ cudaError_t launch_mega_fused_pocket_detection(
         d_signal_mask,
         d_pocket_assignment,
         d_centrality,
+        d_combined_features,
         d_params
     );
 
@@ -1015,6 +1478,7 @@ cudaError_t launch_mega_fused_pocket_detection_with_host_params(
     int* d_signal_mask,
     int* d_pocket_assignment,
     float* d_centrality,
+    float* d_combined_features,  // NEW: 80-dim features per residue
 
     // Host params (will be copied to device)
     const MegaFusedParams* h_params,
@@ -1040,6 +1504,7 @@ cudaError_t launch_mega_fused_pocket_detection_with_host_params(
         d_atoms, d_ca_indices, d_conservation, d_bfactor, d_burial,
         n_atoms, n_residues,
         d_consensus_scores, d_confidence, d_signal_mask, d_pocket_assignment, d_centrality,
+        d_combined_features,
         d_params, stream
     );
 
@@ -1075,6 +1540,95 @@ cudaError_t initialize_reservoir_weights(
 }
 
 }  // extern "C"
+
+//=============================================================================
+// BATCH STRUCTURE DESCRIPTOR (for original batch mode without ground truth)
+//=============================================================================
+
+struct __align__(16) BatchStructureDesc {
+    int atom_offset;
+    int residue_offset;
+    int n_atoms;
+    int n_residues;
+};
+
+//=============================================================================
+// ORIGINAL BATCH KERNEL (without ground truth metrics)
+// One CUDA block per structure
+//=============================================================================
+
+extern "C" __global__ void __launch_bounds__(256, 4)
+mega_fused_batch_detection(
+    const float* __restrict__ atoms_flat,
+    const int* __restrict__ ca_indices_flat,
+    const float* __restrict__ conservation_flat,
+    const float* __restrict__ bfactor_flat,
+    const float* __restrict__ burial_flat,
+    const BatchStructureDesc* __restrict__ descriptors,
+    int n_structures,
+    float* __restrict__ consensus_scores_flat,
+    int* __restrict__ confidence_flat,
+    int* __restrict__ signal_mask_flat,
+    int* __restrict__ pocket_assignment_flat,
+    float* __restrict__ centrality_flat,
+    const MegaFusedParams* __restrict__ params
+) {
+    int sid = blockIdx.x;
+    if (sid >= n_structures) return;
+
+    __shared__ MegaFusedSharedMemory smem;
+
+    int atom_offset = descriptors[sid].atom_offset;
+    int residue_offset = descriptors[sid].residue_offset;
+    int n_residues = descriptors[sid].n_residues;
+
+    int local_idx = threadIdx.x;
+    int tile_idx = 0;  // Single tile per block for simplicity
+
+    if (local_idx < TILE_SIZE) {
+        smem.reservoir_state[local_idx][0] = 0.0f;
+        smem.pocket_assignment[local_idx] = 0;
+    }
+    __syncthreads();
+
+    // Pointers adjusted for this structure
+    const float* atoms = atoms_flat;  // Global atom pool - ca_indices already adjusted
+    const int* ca_indices = ca_indices_flat + residue_offset;
+    const float* conservation = conservation_flat + residue_offset;
+    const float* bfactor = bfactor_flat + residue_offset;
+    const float* burial = burial_flat + residue_offset;
+
+    float* consensus_out = consensus_scores_flat + residue_offset;
+    int* confidence_out = confidence_flat + residue_offset;
+    int* signal_out = signal_mask_flat + residue_offset;
+    int* pocket_out = pocket_assignment_flat + residue_offset;
+    float* centrality_out_ptr = centrality_flat + residue_offset;
+
+    // Process all tiles for this structure
+    int n_tiles = (n_residues + TILE_SIZE - 1) / TILE_SIZE;
+    for (int tile = 0; tile < n_tiles; tile++) {
+        tile_idx = tile;
+
+        // Run all 6 stages
+        stage1_distance_contact(atoms, ca_indices, n_residues, tile_idx, tile_idx, &smem, params);
+        stage2_local_features(conservation, bfactor, burial, n_residues, tile_idx, &smem);
+        stage3_network_centrality(n_residues, tile_idx, &smem, params);
+        stage4_dendritic_reservoir(n_residues, tile_idx, &smem, params);
+        stage5_consensus(n_residues, tile_idx, &smem, params);
+        stage6_kempe_refinement(n_residues, tile_idx, &smem, params);
+
+        // Write outputs for this tile
+        int out_idx = tile_idx * TILE_SIZE + local_idx;
+        if (local_idx < TILE_SIZE && out_idx < n_residues) {
+            consensus_out[out_idx] = smem.consensus_score[local_idx];
+            confidence_out[out_idx] = smem.confidence[local_idx];
+            signal_out[out_idx] = smem.signal_mask[local_idx];
+            pocket_out[out_idx] = smem.pocket_assignment[local_idx];
+            centrality_out_ptr[out_idx] = smem.centrality[local_idx];
+        }
+        __syncthreads();
+    }
+}
 
 //=============================================================================
 // BATCH KERNEL WITH GROUND TRUTH + METRICS (v2.0 FINAL)

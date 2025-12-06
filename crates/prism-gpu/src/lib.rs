@@ -12,6 +12,12 @@
 //! - ✅ DONE(GPU-Phase1): Active Inference kernel integration
 //! - ✅ DONE(GPU-Phase3): Quantum evolution kernel integration
 //! - ✅ DONE(GPU-Phase6): TDA persistent homology kernel integration
+//!
+//! ## Hybrid TDA + Mega-Fused Integration
+//!
+//! - `batch_tda`: Spatial neighborhood TDA with KD-tree and multi-radius analysis
+//! - `mega_fused_integrated`: Combined 80-dim features (32 base + 48 TDA)
+//! - `training`: Ridge regression training pipeline for CryptoBench
 
 pub mod aatgs;
 pub mod aatgs_integration;
@@ -26,6 +32,9 @@ pub mod floyd_warshall;
 pub mod global_context;
 pub mod lbs;
 pub mod mega_fused;
+pub mod mega_fused_batch;
+pub mod readout_training;
+pub mod reservoir_construction;
 pub mod molecular;
 pub mod multi_device_pool;
 pub mod multi_gpu;
@@ -39,6 +48,11 @@ pub mod thermodynamic;
 pub mod transfer_entropy;
 pub mod ultra_kernel;
 pub mod whcr;
+
+// Hybrid TDA + Mega-Fused Integration modules
+pub mod batch_tda;
+pub mod mega_fused_integrated;
+pub mod training;
 
 // Re-export commonly used items
 pub use aatgs::{AATGSBuffers, AATGSScheduler, AsyncPipeline};
@@ -75,5 +89,30 @@ pub use transfer_entropy::{CausalGraph, TEMatrix, TEParams, TransferEntropyGpu};
 pub use ultra_kernel::UltraKernelGpu;
 pub use whcr::{RepairResult, WhcrGpu};
 pub use cryptic_gpu::{CrypticGpu, CrypticGpuConfig, CrypticGpuResult, CrypticCluster};
-pub use mega_fused::{MegaFusedGpu, MegaFusedConfig, MegaFusedMode, MegaFusedOutput, confidence, signals};
+pub use mega_fused::{MegaFusedGpu, MegaFusedConfig, MegaFusedMode, MegaFusedOutput, MegaFusedParams, GpuProvenanceData, KernelTelemetryEvent, GpuTelemetry, confidence, signals};
+pub use mega_fused_batch::{MegaFusedBatchGpu, BatchStructureDesc, StructureInput, PackedBatch, BatchStructureOutput, BatchOutput, TrainingOutput};
 pub use global_context::{GlobalGpuContext, GlobalGpuError};
+pub use reservoir_construction::{BioReservoir, SparseConnection, compute_readout_weights};
+pub use readout_training::{TrainedReadout, ReservoirStateCollector, RESERVOIR_STATE_DIM};
+
+// Hybrid TDA + Mega-Fused Integration re-exports
+pub use batch_tda::{
+    KdTree, NeighborhoodBuilder, SpatialNeighborhood, NeighborhoodData,
+    BatchTdaExecutor, HybridTdaExecutor, HybridTdaConfig, TdaFeatures,
+    StreamingTdaPipeline, StreamingConfig,
+    f32_to_f16, f16_to_f32, F16,
+    BASE_FEATURES, TDA_FEATURE_COUNT, TOTAL_COMBINED_FEATURES,
+    NUM_RADII, TDA_RADII, FEATURES_PER_RADIUS, TDA_SCALES,
+    MAX_NEIGHBORS, tda_feature_index,
+};
+pub use mega_fused_integrated::{
+    IntegratedCpu, IntegratedConfig, IntegratedOutput,
+    NormalizationStats,
+};
+pub use training::{
+    FeaturePipeline, FeatureConfig, StructureFeatures,
+    Normalizer, WelfordStats, NormStats,
+    ReadoutTrainer as HybridReadoutTrainer, RidgeConfig,
+    CryptoBenchRunner, BenchmarkConfig, BenchmarkResult,
+    TrainingError, TrainingSample, TrainingBatch, Metrics,
+};
